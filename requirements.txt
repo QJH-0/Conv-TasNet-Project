@@ -1,0 +1,31 @@
+# Conv-TasNet 语音分离项目依赖
+
+# PyTorch
+torch>=1.8.0
+torchaudio>=0.8.0
+
+# 数值计算
+numpy>=1.19.0
+scipy>=1.5.0
+
+# 音频处理
+librosa>=0.8.0
+soundfile>=0.10.0
+
+# 评估指标
+mir_eval>=0.7  # BSS Eval 标准实现
+# pesq>=0.0.3  # 可选：需要额外安装
+
+# 配置文件
+pyyaml>=5.4
+
+# 可视化
+matplotlib>=3.3.0
+seaborn>=0.11.0
+
+# 训练监控
+tensorboard>=2.4.0
+tqdm>=4.60.0
+
+# 工具
+pydub>=0.25.1  # 音频格式转换

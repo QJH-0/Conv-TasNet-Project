@@ -1,0 +1,89 @@
+# Conv-TasNet 项目配置文件
+
+# 数据集配置
+dataset:
+  name: "AISHELL-3"
+  raw_data_path: "D:\\Paper\\datasets\\AISHELL-3"
+  processed_data_path: "data/processed2"
+  num_speakers: 50                    # 选择的说话人数量
+  samples_per_speaker: 50             # 每位说话人的语音数量
+  train_ratio: 0.8                    # 训练集比例
+  sample_rate: 16000                  # 采样率
+  snr_range: [-3, 3]                  # 信噪比范围（dB）
+  audio_length: 4.0                   # 音频长度（秒）
+  segment_length: 64000               # 片段长度（samples）= 2s * 16000Hz
+  use_cache: true                     # 启用数据缓存（大幅提升数据加载速度）
+
+# 模型配置
+model:
+  name: "Conv-TasNet"
+  encoder:
+    num_filters: 128                  # N: 编码器滤波器数量 (减少以节省显存)
+    kernel_size: 40                   # L: 卷积核大小
+    stride: 8                         # 步长（50%重叠）
+  
+  separation:
+    num_speakers: 2                   # C: 说话人数量
+    bottleneck_channels: 128          # B: 瓶颈层通道数
+    hidden_channels: 256              # H: 隐藏层通道数 (减少以节省显存)
+    skip_channels: 128                # Sc: 跳跃连接通道数
+    kernel_size: 3                    # P: 卷积核大小
+    num_blocks: 7                     # M: 每个TCN块的层数 (减少以节省显存)
+    num_repeats: 2                    # R: TCN块重复次数
+    norm_type: "gLN"                  # 归一化类型（gLN/cLN/BN）
+    causal: false                     # 是否因果卷积
+  
+  decoder:
+    num_filters: 128                  # N: 编码器滤波器数量 (减少以节省显存)
+    kernel_size: 40                   # 卷积核大小
+    stride: 8                         # 步长
+
+# 训练配置
+training:
+  batch_size: 4                       # 提升batch size（配合梯度累积）
+  num_epochs: 100
+  learning_rate: 0.001
+  optimizer: "Adam"
+  
+  # 优化配置
+  accumulation_steps: 4               # 梯度累积步数（有效batch_size=2*4=8）
+  use_amp: true                       # 启用混合精度训练（节省显存，提升速度）
+  
+  # 学习率调度器（论文标准：Halving策略）
+  scheduler:
+    type: "Halving"                   # 使用Halving策略（论文标准）
+    mode: "min"                       # 监控验证损失最小值
+    patience: 3                       # 3个epoch无改进则学习率减半
+    factor: 0.5                       # 学习率衰减因子（减半）
+    min_lr: 1.0e-8                    # 最小学习率（论文标准）
+    
+  gradient_clip: 5.0                  # 梯度裁剪阈值
+  early_stopping_patience: 20         # 早停轮数（增加以避免过早停止）
+  seed: 42                            # 随机种子
+#  resume_checkpoint: "experiments/exp_001/checkpoints/checkpoint_epoch_25.pth"             # 恢复训练的检查点路径 (null表示从头开始)
+  
+# 损失函数
+loss:
+  type: "SI-SNR"                      # Scale-Invariant SNR
+  use_pit: true                       # 使用 PIT (Permutation Invariant Training)
+  
+# 验证配置
+validation:
+  batch_size: 1                       # 减少batch size以适应显存
+  metrics: ["SI-SDR"]                 # 使用 SI-SDR 作为评估指标
+  
+# 设备配置
+device:
+  use_cuda: true
+  gpu_ids: [0]
+  num_workers: 4                      # 多进程数据加载（建议4-8，根据CPU核心数调整）
+                                       # 注意：Windows需要在 if __name__ == "__main__" 下运行
+  
+# 日志与保存
+logging:
+  log_dir: "experiments/exp_002/logs"
+  checkpoint_dir: "experiments/exp_002/checkpoints"
+  result_dir: "experiments/exp_002/results"
+  save_interval: 5                    # 每5个epoch保存一次
+  visualize: true                     # 是否可视化
+  tensorboard: true                   # 是否使用tensorboard
