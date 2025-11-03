@@ -40,13 +40,13 @@ model:
 
 # 训练配置
 training:
-  batch_size: 2                       # 提升batch size（配合梯度累积）
+  batch_size: 8                       # 提升batch size（配合梯度累积）
   num_epochs: 10
   learning_rate: 0.001
   optimizer: "Adam"
   
   # 优化配置
-  accumulation_steps: 2               # 梯度累积步数（有效batch_size=2*4=8）
+  accumulation_steps: 4               # 梯度累积步数（有效batch_size=2*4=8）
   use_amp: true                       # 启用混合精度训练（节省显存，提升速度）
   
   # 学习率调度器（论文标准：Halving策略）
@@ -75,8 +75,8 @@ validation:
 # 设备配置
 device:
   use_cuda: true
-  gpu_ids: [0]
-  num_workers: 4                      # 多进程数据加载（建议4-8，根据CPU核心数调整）
+  gpu_ids: [0,1]
+  num_workers: 8                      # 多进程数据加载（建议4-8，根据CPU核心数调整）
                                        # 注意：Windows需要在 if __name__ == "__main__" 下运行
   
 # 日志与保存
