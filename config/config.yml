@@ -44,6 +44,7 @@ training:
   num_epochs: 10
   learning_rate: 0.001
   optimizer: "Adam"
+  weight_decay: 1e-5                #权重衰减（L2正则化）
   
   # 优化配置
   accumulation_steps: 4               # 梯度累积步数（有效batch_size=2*4=8）
@@ -57,7 +58,7 @@ training:
     factor: 0.5                       # 学习率衰减因子（减半）
     min_lr: 1.0e-8                    # 最小学习率（论文标准）
     
-  gradient_clip: 5.0                  # 梯度裁剪阈值
+  gradient_clip: 200                  # 梯度裁剪阈值
   early_stopping_patience: 20         # 早停轮数（增加以避免过早停止）
   seed: 42                            # 随机种子
 #  resume_checkpoint: "experiments/exp_001/checkpoints/checkpoint_epoch_25.pth"             # 恢复训练的检查点路径 (null表示从头开始)

@@ -141,6 +141,7 @@ class Trainer:
         """创建优化器（论文标准配置）"""
         optimizer_type = config['optimizer']
         lr = config['learning_rate']
+        weight_decay = config.get('weight_decay', 0)  # 从配置读取权重衰减，默认为0
         
         if optimizer_type == 'Adam':
             # 论文标准Adam配置
@@ -149,13 +150,14 @@ class Trainer:
                 lr=lr,
                 betas=(0.9, 0.999),  # 论文标准
                 eps=1e-8,            # 论文标准
-                weight_decay=0       # 无权重衰减
+                weight_decay=weight_decay  # L2正则化
             )
         elif optimizer_type == 'SGD':
             optimizer = torch.optim.SGD(
                 self.model.parameters(),
                 lr=lr,
-                momentum=0.9
+                momentum=0.9,
+                weight_decay=weight_decay  # L2正则化
             )
         else:
             raise ValueError(f"Unsupported optimizer: {optimizer_type}")
@@ -459,6 +461,9 @@ class Trainer:
         self.logger.info(f"Training samples: {len(train_loader.dataset)}")
         self.logger.info(f"Validation samples: {len(val_loader.dataset)}")
         self.logger.info(f"\nOptimization Settings:")
+        self.logger.info(f"  Optimizer: {self.config['training']['optimizer']}")
+        self.logger.info(f"  Learning rate: {self.config['training']['learning_rate']}")
+        self.logger.info(f"  Weight decay: {self.config['training'].get('weight_decay', 0)}")
         self.logger.info(f"  Batch size: {self.config['training']['batch_size']}")
         self.logger.info(f"  Accumulation steps: {self.accumulation_steps}")
         self.logger.info(f"  Effective batch size: {self.effective_batch_size}")
