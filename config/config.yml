@@ -44,7 +44,7 @@ training:
   num_epochs: 10
   learning_rate: 0.001
   optimizer: "Adam"
-  weight_decay: 1e-5                #权重衰减（L2正则化）
+  weight_decay: 1.0e-5                #权重衰减（L2正则化）
   
   # 优化配置
   accumulation_steps: 4               # 梯度累积步数（有效batch_size=2*4=8）
@@ -82,9 +82,9 @@ device:
   
 # 日志与保存
 logging:
-  log_dir: "experiments/exp_004/logs"
-  checkpoint_dir: "experiments/exp_004/checkpoints"
-  result_dir: "experiments/exp_004/results"
+  log_dir: "experiments/exp_1/logs"
+  checkpoint_dir: "experiments/exp_1/checkpoints"
+  result_dir: "experiments/exp_1/results"
   save_interval: 5                    # 每5个epoch保存一次
   visualize: true                     # 是否可视化
   tensorboard: true                   # 是否使用tensorboard
