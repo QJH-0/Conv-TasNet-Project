@@ -23,12 +23,34 @@ from utils.logger import setup_logger
 
 
 def load_config(config_path):
-    """加载配置文件"""
-    # 如果是相对路径，转换为相对于项目根目录的绝对路径
-    if not os.path.isabs(config_path):
-        config_path = os.path.join(project_root, config_path)
+    """加载配置文件 - 先从config_loadpath.yml获取实际配置文件路径"""
+    # 首先加载config_loadpath.yml获取实际配置文件路径
+    loadpath_config_file = os.path.join(project_root, 'config', 'config_loadpath.yml')
     
-    with open(config_path, 'r', encoding='utf-8') as f:
+    if os.path.exists(loadpath_config_file):
+        with open(loadpath_config_file, 'r', encoding='utf-8') as f:
+            loadpath_config = yaml.safe_load(f)
+        
+        # 从config_loadpath.yml获取实际配置文件路径
+        if 'loadPath' in loadpath_config and 'config' in loadpath_config['loadPath']:
+            actual_config_path = loadpath_config['loadPath']['config']
+            print(f"从 config_loadpath.yml 加载配置文件路径: {actual_config_path}")
+        else:
+            # 如果config_loadpath.yml格式不正确，使用传入的参数
+            print(f"警告: config_loadpath.yml 格式不正确，使用默认配置路径")
+            actual_config_path = config_path
+    else:
+        # 如果config_loadpath.yml不存在，使用传入的参数
+        print(f"警告: config_loadpath.yml 不存在，使用默认配置路径")
+        actual_config_path = config_path
+    
+    # 如果是相对路径，转换为相对于项目根目录的绝对路径
+    if not os.path.isabs(actual_config_path):
+        actual_config_path = os.path.join(project_root, actual_config_path)
+    
+    print(f"加载配置文件: {actual_config_path}")
+    
+    with open(actual_config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
     # 规范化配置中的所有路径为基于项目根目录的绝对路径
@@ -49,11 +71,26 @@ def load_config(config_path):
 
 
 def load_model(checkpoint_path, config, device):
-    """加载模型"""
+    """加载模型（兼容单GPU和多GPU训练的checkpoint）"""
+    from collections import OrderedDict
+    
     model = ConvTasNet.from_config(config)
     
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    state_dict = checkpoint['model_state_dict']
+    
+    # 处理DataParallel的key不匹配问题
+    # 如果checkpoint是多GPU训练的（有module.前缀），但当前模型没有DataParallel包装
+    if list(state_dict.keys())[0].startswith('module.'):
+        # 移除'module.'前缀
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            name = k[7:] if k.startswith('module.') else k  # 移除'module.'
+            new_state_dict[name] = v
+        state_dict = new_state_dict
+        print("✓ Converted multi-GPU checkpoint to single-GPU format")
+    
+    model.load_state_dict(state_dict)
     model = model.to(device)
     model.eval()
     
@@ -88,11 +125,22 @@ def main():
     parser.add_argument('--config', type=str, default='config/config.yml',
                        help='Path to config file')
     parser.add_argument('--data-dir', type=str, default=None,
-                       help='Path to test data directory')
+                       help='Path to test data directory (override config)')
+    parser.add_argument('--output-dir', type=str, default=None,
+                       help='Output directory for results (override config)')
+    parser.add_argument('--gpu-id', type=int, default=None,
+                       help='GPU ID to use (override config)')
     args = parser.parse_args()
     
     # 加载配置
     config = load_config(args.config)
+    
+    # 应用命令行参数覆盖
+    if args.output_dir:
+        config['logging']['result_dir'] = os.path.join(args.output_dir, 'results')
+        config['logging']['checkpoint_dir'] = os.path.join(args.output_dir, 'checkpoints')
+    if args.gpu_id is not None:
+        config['device']['gpu_ids'] = [args.gpu_id]
     
     # 自动查找检查点
     if args.checkpoint is None:

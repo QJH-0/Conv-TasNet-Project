@@ -1,5 +1,5 @@
 /experiments/
-
-/dataset/
+*.md
+/data/
 /outputs/
 /test_plots/

@@ -36,12 +36,34 @@ def set_seed(seed):
 
 
 def load_config(config_path):
-    """加载配置文件"""
-    # 如果是相对路径，转换为相对于项目根目录的绝对路径
-    if not os.path.isabs(config_path):
-        config_path = os.path.join(project_root, config_path)
+    """加载配置文件 - 先从config_loadpath.yml获取实际配置文件路径"""
+    # 首先加载config_loadpath.yml获取实际配置文件路径
+    loadpath_config_file = os.path.join(project_root, 'config', 'config_loadpath.yml')
     
-    with open(config_path, 'r', encoding='utf-8') as f:
+    if os.path.exists(loadpath_config_file):
+        with open(loadpath_config_file, 'r', encoding='utf-8') as f:
+            loadpath_config = yaml.safe_load(f)
+        
+        # 从config_loadpath.yml获取实际配置文件路径
+        if 'loadPath' in loadpath_config and 'config' in loadpath_config['loadPath']:
+            actual_config_path = loadpath_config['loadPath']['config']
+            print(f"从 config_loadpath.yml 加载配置文件路径: {actual_config_path}")
+        else:
+            # 如果config_loadpath.yml格式不正确，使用传入的参数
+            print(f"警告: config_loadpath.yml 格式不正确，使用默认配置路径")
+            actual_config_path = config_path
+    else:
+        # 如果config_loadpath.yml不存在，使用传入的参数
+        print(f"警告: config_loadpath.yml 不存在，使用默认配置路径")
+        actual_config_path = config_path
+    
+    # 如果是相对路径，转换为相对于项目根目录的绝对路径
+    if not os.path.isabs(actual_config_path):
+        actual_config_path = os.path.join(project_root, actual_config_path)
+    
+    print(f"加载配置文件: {actual_config_path}")
+    
+    with open(actual_config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
     # 规范化配置中的所有路径为基于项目根目录的绝对路径
@@ -68,10 +90,56 @@ def main():
                        help='Path to config file')
     parser.add_argument('--resume', type=str, default=None,
                        help='Path to checkpoint to resume from (overrides config)')
+    
+    # 数据路径参数（可覆盖config）
+    parser.add_argument('--data-dir', type=str, default=None,
+                       help='Processed data directory (override config)')
+    parser.add_argument('--output-dir', type=str, default=None,
+                       help='Output directory for logs/checkpoints (override config)')
+    
+    # 训练参数（可覆盖config）
+    parser.add_argument('--batch-size', type=int, default=None,
+                       help='Batch size (override config)')
+    parser.add_argument('--num-epochs', type=int, default=None,
+                       help='Number of epochs (override config)')
+    parser.add_argument('--learning-rate', type=float, default=None,
+                       help='Learning rate (override config)')
+    parser.add_argument('--use-amp', action='store_true', default=None,
+                       help='Use automatic mixed precision (override config)')
+    parser.add_argument('--no-amp', action='store_true',
+                       help='Disable automatic mixed precision')
+    
+    # GPU参数
+    parser.add_argument('--gpu-ids', type=str, default=None,
+                       help='GPU IDs to use (comma separated, e.g., 0,1)')
+    
     args = parser.parse_args()
     
     # 加载配置
     config = load_config(args.config)
+    
+    # 应用命令行参数覆盖
+    if args.data_dir:
+        config['dataset']['processed_data_path'] = args.data_dir
+    if args.output_dir:
+        # 同时覆盖所有输出路径
+        config['logging']['log_dir'] = os.path.join(args.output_dir, 'logs')
+        config['logging']['checkpoint_dir'] = os.path.join(args.output_dir, 'checkpoints')
+        config['logging']['result_dir'] = os.path.join(args.output_dir, 'results')
+    if args.batch_size:
+        config['training']['batch_size'] = args.batch_size
+    if args.num_epochs:
+        config['training']['num_epochs'] = args.num_epochs
+    if args.learning_rate:
+        config['training']['learning_rate'] = args.learning_rate
+    if args.use_amp:
+        config['training']['use_amp'] = True
+    if args.no_amp:
+        config['training']['use_amp'] = False
+    if args.gpu_ids:
+        gpu_ids = [int(i) for i in args.gpu_ids.split(',')]
+        config['device']['gpu_ids'] = gpu_ids
+    
     print("=" * 80)
     print("Configuration loaded successfully")
     print("=" * 80)
@@ -94,10 +162,14 @@ def main():
     
     # 设置设备
     device_config = config['device']
+    gpu_ids = device_config['gpu_ids']
     if device_config['use_cuda'] and torch.cuda.is_available():
-        device = f"cuda:{device_config['gpu_ids'][0]}"
+        device = f"cuda:{gpu_ids[0]}"
         print(f"Using device: {device}")
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        if len(gpu_ids) > 1:
+            print(f"Using {len(gpu_ids)} GPUs: {gpu_ids}")
+        for gpu_id in gpu_ids:
+            print(f"  GPU {gpu_id}: {torch.cuda.get_device_name(gpu_id)}")
     else:
         device = 'cpu'
         print(f"Using device: {device}")
@@ -113,6 +185,11 @@ def main():
     # 创建模型
     logger.info("Creating model...")
     model = ConvTasNet.from_config(config)
+    
+    # 多GPU支持
+    if len(gpu_ids) > 1 and torch.cuda.is_available():
+        logger.info(f"Using DataParallel with {len(gpu_ids)} GPUs: {gpu_ids}")
+        model = torch.nn.DataParallel(model, device_ids=gpu_ids)
     
     # 输出模型配置
     logger.info("\nModel Configuration:")
@@ -142,10 +219,13 @@ def main():
     logger.info("Model Parameters:")
     logger.info("-" * 80)
     
+    # 获取原始模型（如果使用了DataParallel，需要访问model.module）
+    base_model = model.module if isinstance(model, torch.nn.DataParallel) else model
+    
     # 按模块统计参数
-    encoder_params = sum(p.numel() for p in model.encoder.parameters())
-    separation_params = sum(p.numel() for p in model.separation.parameters())
-    decoder_params = sum(p.numel() for p in model.decoder.parameters())
+    encoder_params = sum(p.numel() for p in base_model.encoder.parameters())
+    separation_params = sum(p.numel() for p in base_model.separation.parameters())
+    decoder_params = sum(p.numel() for p in base_model.decoder.parameters())
     
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

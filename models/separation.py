@@ -72,11 +72,11 @@ class Separation(nn.Module):
             self.tcn_blocks.append(tcn_block)
         
         # Mask生成：skip_channels -> C * N
-        # 论文使用ReLU而非Sigmoid，允许掩码>1以实现信号放大
+        # 论文使用Sigmoid
         self.mask_conv = nn.Sequential(
             nn.PReLU(),
             nn.Conv1d(skip_channels, num_speakers * encoder_filters, 1),
-            nn.ReLU()  # 掩码值在 [0, +∞)，允许信号放大
+            nn.Sigmoid()
         )
     
     def forward(self, encoder_output):

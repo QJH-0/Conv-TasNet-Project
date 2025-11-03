@@ -5,8 +5,8 @@ dataset:
   name: "AISHELL-3"
   raw_data_path: "D:\\Paper\\datasets\\AISHELL-3"
   processed_data_path: "data/processed2"
-  num_speakers: 50                    # 选择的说话人数量
-  samples_per_speaker: 50             # 每位说话人的语音数量
+  num_speakers: 5                    # 选择的说话人数量
+  samples_per_speaker: 5            # 每位说话人的语音数量
   train_ratio: 0.8                    # 训练集比例
   sample_rate: 16000                  # 采样率
   snr_range: [-3, 3]                  # 信噪比范围（dB）
@@ -40,13 +40,13 @@ model:
 
 # 训练配置
 training:
-  batch_size: 4                       # 提升batch size（配合梯度累积）
-  num_epochs: 100
+  batch_size: 2                       # 提升batch size（配合梯度累积）
+  num_epochs: 10
   learning_rate: 0.001
   optimizer: "Adam"
   
   # 优化配置
-  accumulation_steps: 4               # 梯度累积步数（有效batch_size=2*4=8）
+  accumulation_steps: 2               # 梯度累积步数（有效batch_size=2*4=8）
   use_amp: true                       # 启用混合精度训练（节省显存，提升速度）
   
   # 学习率调度器（论文标准：Halving策略）
@@ -81,9 +81,9 @@ device:
   
 # 日志与保存
 logging:
-  log_dir: "experiments/exp_002/logs"
-  checkpoint_dir: "experiments/exp_002/checkpoints"
-  result_dir: "experiments/exp_002/results"
+  log_dir: "experiments/exp_004/logs"
+  checkpoint_dir: "experiments/exp_004/checkpoints"
+  result_dir: "experiments/exp_004/results"
   save_interval: 5                    # 每5个epoch保存一次
   visualize: true                     # 是否可视化
   tensorboard: true                   # 是否使用tensorboard

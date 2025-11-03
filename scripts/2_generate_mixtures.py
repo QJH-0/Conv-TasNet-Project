@@ -24,12 +24,34 @@ from utils.audio_utils import mix_audio_with_snr, normalize_mixture
 
 
 def load_config(config_path):
-    """加载配置文件"""
-    # 如果是相对路径，转换为相对于项目根目录的绝对路径
-    if not os.path.isabs(config_path):
-        config_path = os.path.join(project_root, config_path)
+    """加载配置文件 - 先从config_loadpath.yml获取实际配置文件路径"""
+    # 首先加载config_loadpath.yml获取实际配置文件路径
+    loadpath_config_file = os.path.join(project_root, 'config', 'config_loadpath.yml')
     
-    with open(config_path, 'r', encoding='utf-8') as f:
+    if os.path.exists(loadpath_config_file):
+        with open(loadpath_config_file, 'r', encoding='utf-8') as f:
+            loadpath_config = yaml.safe_load(f)
+        
+        # 从config_loadpath.yml获取实际配置文件路径
+        if 'loadPath' in loadpath_config and 'config' in loadpath_config['loadPath']:
+            actual_config_path = loadpath_config['loadPath']['config']
+            print(f"从 config_loadpath.yml 加载配置文件路径: {actual_config_path}")
+        else:
+            # 如果config_loadpath.yml格式不正确，使用传入的参数
+            print(f"警告: config_loadpath.yml 格式不正确，使用默认配置路径")
+            actual_config_path = config_path
+    else:
+        # 如果config_loadpath.yml不存在，使用传入的参数
+        print(f"警告: config_loadpath.yml 不存在，使用默认配置路径")
+        actual_config_path = config_path
+    
+    # 如果是相对路径，转换为相对于项目根目录的绝对路径
+    if not os.path.isabs(actual_config_path):
+        actual_config_path = os.path.join(project_root, actual_config_path)
+    
+    print(f"加载配置文件: {actual_config_path}")
+    
+    with open(actual_config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
     # 规范化配置中的所有路径为基于项目根目录的绝对路径
@@ -292,6 +314,14 @@ def main():
     parser = argparse.ArgumentParser(description='Generate mixture dataset from AISHELL-3')
     parser.add_argument('--config', type=str, default='config/config.yml',
                        help='Path to config file')
+    
+    # 路径参数（可覆盖config）
+    parser.add_argument('--input-dir', type=str, default=None,
+                       help='AISHELL-3 input directory (override config)')
+    parser.add_argument('--output-dir', type=str, default=None,
+                       help='Output directory (override config)')
+    
+    # 数据集参数（可覆盖config）
     parser.add_argument('--num-speakers', type=int, default=None,
                        help='Number of speakers to use (override config)')
     parser.add_argument('--num-utterances', type=int, default=None,
@@ -300,6 +330,18 @@ def main():
                        help='Number of training samples (override config)')
     parser.add_argument('--num-test', type=int, default=None,
                        help='Number of test samples (override config)')
+    
+    # 音频参数（可覆盖config）
+    parser.add_argument('--sample-rate', type=int, default=None,
+                       help='Sample rate (override config)')
+    parser.add_argument('--audio-length', type=float, default=None,
+                       help='Audio length in seconds (override config)')
+    parser.add_argument('--snr-min', type=float, default=None,
+                       help='Minimum SNR in dB (override config)')
+    parser.add_argument('--snr-max', type=float, default=None,
+                       help='Maximum SNR in dB (override config)')
+    
+    # 其他参数
     parser.add_argument('--seed', type=int, default=None,
                        help='Random seed (override config)')
     args = parser.parse_args()
@@ -309,6 +351,18 @@ def main():
     
     # 从配置文件读取参数,命令行参数可以覆盖
     dataset_config = config['dataset']
+    
+    # 路径参数
+    input_dir = args.input_dir if args.input_dir is not None else dataset_config['raw_data_path']
+    output_dir = args.output_dir if args.output_dir is not None else dataset_config['processed_data_path']
+    
+    # 覆盖配置中的路径（让后续代码使用命令行参数）
+    if args.input_dir:
+        dataset_config['raw_data_path'] = input_dir
+    if args.output_dir:
+        dataset_config['processed_data_path'] = output_dir
+    
+    # 数据集参数
     num_speakers = args.num_speakers if args.num_speakers is not None else dataset_config['num_speakers']
     num_utterances = args.num_utterances if args.num_utterances is not None else dataset_config['samples_per_speaker']
     
@@ -317,6 +371,16 @@ def main():
     train_ratio = dataset_config.get('train_ratio', 0.8)
     num_train = args.num_train if args.num_train is not None else int(total_samples * train_ratio)
     num_test = args.num_test if args.num_test is not None else (total_samples - num_train)
+    
+    # 音频参数
+    if args.sample_rate is not None:
+        dataset_config['sample_rate'] = args.sample_rate
+    if args.audio_length is not None:
+        dataset_config['audio_length'] = args.audio_length
+    if args.snr_min is not None or args.snr_max is not None:
+        snr_min = args.snr_min if args.snr_min is not None else dataset_config['snr_range'][0]
+        snr_max = args.snr_max if args.snr_max is not None else dataset_config['snr_range'][1]
+        dataset_config['snr_range'] = [snr_min, snr_max]
     
     # 随机种子
     seed = args.seed if args.seed is not None else config['training']['seed']

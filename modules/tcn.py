@@ -59,8 +59,6 @@ class TemporalBlock(nn.Module):
         self.norm1 = select_norm(norm_type, hidden_channels)
 
         # 深度卷积（Depthwise Conv）
-        # 论文中只使用Depthwise卷积，不需要Pointwise部分
-        # 这样可以大幅减少参数量：H*P 而不是 H*P + H*H
         self.dw_conv = nn.Conv1d(
             in_channels=hidden_channels,
             out_channels=hidden_channels,

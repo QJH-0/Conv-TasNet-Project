@@ -356,15 +356,18 @@ class Trainer:
     
     def save_checkpoint(self, epoch, is_best=False):
         """
-        保存检查点
+        保存检查点（兼容单GPU和多GPU）
         
         Args:
             epoch: 当前epoch
             is_best: 是否最佳模型
         """
+        # 获取实际模型（移除DataParallel包装）
+        model_to_save = self.model.module if isinstance(self.model, torch.nn.DataParallel) else self.model
+        
         checkpoint = {
             'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
+            'model_state_dict': model_to_save.state_dict(),  # 保存不带module.前缀的模型
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict(),
             'best_val_loss': self.best_val_loss,
@@ -387,14 +390,39 @@ class Trainer:
     
     def load_checkpoint(self, checkpoint_path):
         """
-        加载检查点
+        加载检查点（兼容单GPU和多GPU训练的checkpoint）
         
         Args:
             checkpoint_path: 检查点路径
         """
-        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only= False)
+        from collections import OrderedDict
         
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        
+        # 获取state_dict
+        state_dict = checkpoint['model_state_dict']
+        
+        # 处理DataParallel的key不匹配问题
+        # 如果加载的是多GPU训练的模型，但当前是单GPU
+        if not isinstance(self.model, torch.nn.DataParallel) and list(state_dict.keys())[0].startswith('module.'):
+            # 移除'module.'前缀
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = k[7:] if k.startswith('module.') else k  # 移除'module.'
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+            self.logger.info("Converted multi-GPU checkpoint to single-GPU format")
+        # 如果当前是多GPU，但加载的是单GPU训练的模型
+        elif isinstance(self.model, torch.nn.DataParallel) and not list(state_dict.keys())[0].startswith('module.'):
+            # 添加'module.'前缀
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = 'module.' + k
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+            self.logger.info("Converted single-GPU checkpoint to multi-GPU format")
+        
+        self.model.load_state_dict(state_dict)
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         
