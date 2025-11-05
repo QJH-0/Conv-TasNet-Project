@@ -211,11 +211,13 @@ class Trainer:
         self.optimizer.zero_grad()
         
         pbar = tqdm(dataloader, desc='Training')
-        for batch_idx, (mixtures, targets) in enumerate(pbar):
+        for batch_idx, batch in enumerate(pbar):
             try:
-                # 数据移到设备
-                mixtures = mixtures.to(self.device)  # [B, T]
-                targets = targets.to(self.device)    # [B, C, T]
+                # 数据格式转换（新格式 → 旧格式）
+                # 新格式: batch = {'mix': [B,T], 'ref': [[B,T], [B,T]]}
+                # 旧格式: mixtures=[B,T], targets=[B,C,T]
+                mixtures = batch['mix'].to(self.device)  # [B, T]
+                targets = torch.stack(batch['ref'], dim=1).to(self.device)  # [B, C, T]
                 
                 # 使用混合精度训练
                 with autocast(enabled=self.use_amp):
@@ -320,11 +322,11 @@ class Trainer:
         num_batches = 0
         
         with torch.no_grad():
-            for mixtures, targets in tqdm(dataloader, desc='Validation'):
+            for batch in tqdm(dataloader, desc='Validation'):
                 try:
-                    # 数据移到设备
-                    mixtures = mixtures.to(self.device)
-                    targets = targets.to(self.device)
+                    # 数据格式转换（新格式 → 旧格式）
+                    mixtures = batch['mix'].to(self.device)
+                    targets = torch.stack(batch['ref'], dim=1).to(self.device)
                     
                     # 前向传播
                     estimations = self.model(mixtures)

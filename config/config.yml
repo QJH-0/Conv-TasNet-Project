@@ -4,15 +4,32 @@
 dataset:
   name: "AISHELL-3"
   raw_data_path: "D:\\Paper\\datasets\\AISHELL-3"
-  processed_data_path: "data/processed2"
-  num_speakers: 5                    # 选择的说话人数量
-  samples_per_speaker: 5            # 每位说话人的语音数量
+  processed_data_path: "data/processed3"
+  
+  # wsj0-2mix / Libri2Mix 标准数据集路径
+  # 注意：Windows路径使用双反斜杠 \\ 或正斜杠 /
+  data_path: "data/processed3"
+#  data_path: "D:/Paper/datasets/Libri2Mix_8k"
+
+  # 数据生成参数
+  num_speakers: 20                    # 选择的说话人数量
+  samples_per_speaker: 50            # 每位说话人的语音数量
   train_ratio: 0.8                    # 训练集比例
-  sample_rate: 16000                  # 采样率
+  dev_ratio: 0.1                      # 验证集比例 (dev)
+  sample_rate: 8000                   # 采样率 (8kHz for wsj0-2mix/Libri2Mix_8k)
   snr_range: [-3, 3]                  # 信噪比范围（dB）
-  audio_length: 4.0                   # 音频长度（秒）
-  segment_length: 64000               # 片段长度（samples）= 2s * 16000Hz
-  use_cache: true                     # 启用数据缓存（大幅提升数据加载速度）
+  audio_length_range: [2.0, 6.0]      # 音频长度范围（秒）[最小值, 最大值]
+  # audio_length: 4.0                 # 固定音频长度（秒）- 被 audio_length_range 替代
+  
+  # 数据加载参数（wsj0-2mix标准格式）
+  chunk_size: 32000                   # 动态切片长度（samples）= 4s * 8000Hz
+  use_all_chunks: true               # 是否使用所有切片（True: 每个样本切成多个chunk，数据量翻倍；False: 每个样本只使用一个chunk）
+  
+  # wsj0-2mix 标准目录结构
+  # 训练集: {data_path}/wav8k/train/
+  # 验证集: {data_path}/wav8k/dev/
+  # 测试集: {data_path}/wav8k/test/
+  # 元数据: {data_path}/wav8k/metadata/
 
 # 模型配置
 model:
@@ -40,7 +57,7 @@ model:
 
 # 训练配置
 training:
-  batch_size: 8                       # 提升batch size（配合梯度累积）
+  batch_size: 2                       # 提升batch size（配合梯度累积）
   num_epochs: 10
   learning_rate: 0.001
   optimizer: "Adam"
@@ -76,15 +93,15 @@ validation:
 # 设备配置
 device:
   use_cuda: true
-  gpu_ids: [0,1]
-  num_workers: 8                      # 多进程数据加载（建议4-8，根据CPU核心数调整）
+  gpu_ids: [0]
+  num_workers: 4                      # 多进程数据加载（建议4-8，根据CPU核心数调整）
                                        # 注意：Windows需要在 if __name__ == "__main__" 下运行
   
 # 日志与保存
 logging:
-  log_dir: "experiments/exp_1/logs"
-  checkpoint_dir: "experiments/exp_1/checkpoints"
-  result_dir: "experiments/exp_1/results"
+  log_dir: "experiments/exp_2/logs"
+  checkpoint_dir: "experiments/exp_2/checkpoints"
+  result_dir: "experiments/exp_2/results"
   save_interval: 5                    # 每5个epoch保存一次
   visualize: true                     # 是否可视化
   tensorboard: true                   # 是否使用tensorboard

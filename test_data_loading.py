@@ -1,6 +1,19 @@
 """
+⚠️ 此文件已废弃 (v3.2) ⚠️
+
 测试数据加载的一致性
 验证训练加载的数据与生成的数据一致
+
+废弃原因：
+    - 使用旧版API（segment_length, use_cache, normalize等参数已删除）
+    - 测试旧格式数据（mixed/train目录已不再使用）
+    - 功能已被 test_dataloader_v3.py 替代
+
+替代方案：
+    使用 test_dataloader_v3.py 进行数据加载测试
+    
+建议：
+    此文件可以删除或作为历史参考保留
 """
 
 import torch

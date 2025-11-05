@@ -174,28 +174,38 @@ def main():
     model = load_model(args.checkpoint, config, device)
     logger.info("Model loaded successfully")
     
-    # 创建数据加载器
+    # 创建数据加载器（wsj0-2mix格式）
     if args.data_dir:
         test_dir = args.data_dir
     else:
-        test_dir = os.path.join(
-            config['dataset']['processed_data_path'],
-            'mixed/test'
-        )
+        # wsj0-2mix 标准路径
+        if 'data_path' in config['dataset']:
+            # 使用预处理好的数据集（如 Libri2Mix）
+            test_dir = os.path.join(config['dataset']['data_path'], 'test')
+        else:
+            # 使用自己生成的数据
+            sr_folder = f"wav{config['dataset']['sample_rate']//1000}k"
+            test_dir = os.path.join(
+                config['dataset']['processed_data_path'],
+                sr_folder, 'test'
+            )
     
     logger.info(f"Test data directory: {test_dir}")
     
+    # 新API：简化的参数
+    use_all_chunks = config['dataset'].get('use_all_chunks', True)  # 默认True保持向后兼容
+    
     test_loader = create_dataloader(
         data_dir=test_dir,
+        is_train=False,  # 测试模式：固定起点，不shuffle
         batch_size=config['validation']['batch_size'],
         num_workers=config['device']['num_workers'],
         sample_rate=config['dataset']['sample_rate'],
-        segment_length=config['dataset']['segment_length'],
-        shuffle=False,
-        pin_memory=False
+        chunk_size=config['dataset']['chunk_size'],
+        use_all_chunks=use_all_chunks
     )
     
-    logger.info(f"Test samples: {len(test_loader.dataset)}")
+    logger.info(f"Use all chunks: {use_all_chunks}")
     logger.info(f"Test batches: {len(test_loader)}")
     
     # 评估

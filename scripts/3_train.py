@@ -120,7 +120,7 @@ def main():
     
     # 应用命令行参数覆盖
     if args.data_dir:
-        config['dataset']['processed_data_path'] = args.data_dir
+        config['dataset']['data_path'] = args.data_dir
     if args.output_dir:
         # 同时覆盖所有输出路径
         config['logging']['log_dir'] = os.path.join(args.output_dir, 'logs')
@@ -272,48 +272,54 @@ def main():
     #     logger.info(f"Resume From: {resume_checkpoint}")
     # logger.info("-" * 80)
     
-    # 创建数据加载器
+    # 创建数据加载器（wsj0-2mix格式）
     logger.info("\nCreating dataloaders...")
     
-    # 路径已在load_config中规范化为绝对路径
-    train_dir = os.path.join(
-        config['dataset']['processed_data_path'],
-        'mixed', 'train'
-    )
-    val_dir = os.path.join(
-        config['dataset']['processed_data_path'],
-        'mixed', 'test'
-    )
+    # wsj0-2mix 标准路径
+    # 使用 data_path 如果存在，否则使用 processed_data_path
+    if 'data_path' in config['dataset']:
+        # 使用预处理好的数据集（如 Libri2Mix）
+        base_path = config['dataset']['data_path']
+        train_dir = os.path.join(base_path, 'train')
+        val_dir = os.path.join(base_path, 'dev')
+    else:
+        # 使用自己生成的数据
+        base_path = config['dataset']['processed_data_path']
+        sr_folder = f"wav{config['dataset']['sample_rate']//1000}k"
+        train_dir = os.path.join(base_path, sr_folder, 'train')
+        val_dir = os.path.join(base_path, sr_folder, 'dev')
+    
+    logger.info(f"Train directory: {train_dir}")
+    logger.info(f"Val directory: {val_dir}")
+    
+    # 新API：简化的参数
+    use_all_chunks = config['dataset'].get('use_all_chunks', True)  # 默认True保持向后兼容
     
     train_loader = create_dataloader(
         data_dir=train_dir,
+        is_train=True,  # 训练模式：随机起点+shuffle
         batch_size=config['training']['batch_size'],
         num_workers=config['device']['num_workers'],
         sample_rate=config['dataset']['sample_rate'],
-        segment_length=config['dataset']['segment_length'],
-        shuffle=True,
-        pin_memory=True,
-        use_cache=config['dataset'].get('use_cache', True),
-        # ✅ 优化配置：避免重复处理
-        normalize=False,       # 数据生成时已归一化，不需要再次处理
-        augmentation=False,    # 数据已固定长度，随机裁剪无效
-        dynamic_mixing=False   # 保护数据生成时的精确SNR控制
+        chunk_size=config['dataset']['chunk_size'],
+        use_all_chunks=use_all_chunks
     )
     
     val_loader = create_dataloader(
         data_dir=val_dir,
+        is_train=False,  # 验证模式：固定起点，不shuffle
         batch_size=config['validation']['batch_size'],
         num_workers=config['device']['num_workers'],
         sample_rate=config['dataset']['sample_rate'],
-        segment_length=config['dataset']['segment_length'],
-        shuffle=False,
-        pin_memory=True,
-        use_cache=config['dataset'].get('use_cache', True),
-        # ✅ 验证集同样使用优化配置
-        normalize=False,
-        augmentation=False,
-        dynamic_mixing=False
+        chunk_size=config['dataset']['chunk_size'],
+        use_all_chunks=use_all_chunks
     )
+    
+    logger.info(f"Use all chunks: {use_all_chunks}")
+    if not use_all_chunks:
+        logger.info("  -> Each sample returns only ONE chunk (progress bar shows ~original sample count)")
+    else:
+        logger.info("  -> Each sample returns MULTIPLE chunks (progress bar shows ~2x sample count)")
     
     logger.info(f"Train batches: {len(train_loader)}")
     logger.info(f"Val batches: {len(val_loader)}")

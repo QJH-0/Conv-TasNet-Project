@@ -1,6 +1,7 @@
 """
 数据生成脚本
 从AISHELL-3数据集生成混合语音数据
+按照 wsj0-2mix 格式组织文件结构和元数据
 """
 
 import os
@@ -10,7 +11,7 @@ import yaml
 import torch
 import torchaudio
 import random
-import json
+import csv
 import glob
 from tqdm import tqdm
 
@@ -197,41 +198,57 @@ def load_and_resample_audio(audio_path, target_sr, target_length):
 
 def generate_mixture_dataset(config, speaker_utterances, num_samples=100, split='train'):
     """
-    生成混合语音数据集
+    生成混合语音数据集（wsj0-2mix格式）
     
     Args:
         config: 配置字典
         speaker_utterances: {speaker_id: [audio_paths]}
         num_samples: 样本数量
-        split: 'train' 或 'test'
+        split: 'train' (训练), 'dev' (验证) 或 'test' (测试)
     """
     dataset_config = config['dataset']
     sample_rate = dataset_config['sample_rate']
-    audio_length = dataset_config['audio_length']
+    
+    # 支持固定长度或长度范围
+    if 'audio_length_range' in dataset_config:
+        audio_length_range = dataset_config['audio_length_range']
+        print(f"使用随机音频长度范围: {audio_length_range[0]:.1f}s - {audio_length_range[1]:.1f}s")
+    else:
+        # 兼容旧配置（固定长度）
+        audio_length = dataset_config.get('audio_length', 4.0)
+        audio_length_range = [audio_length, audio_length]
+        print(f"使用固定音频长度: {audio_length:.1f}s")
+    
     snr_range = dataset_config['snr_range']
     
-    # 计算目标样本点数
-    target_length = int(sample_rate * audio_length)
+    # 按 wsj0-2mix 格式组织输出目录
+    # 新结构: wav8k/train, wav8k/dev, wav8k/test
+    # sr_folder = f"wav{sample_rate//1000}k"
+    # output_base = os.path.join(dataset_config['processed_data_path'], sr_folder)
+    # 新结构: /train, /dev, /test
+    # 每个split下包含 mix_clean, s1, s2 三个子目录
+    split_dir = os.path.join(dataset_config['processed_data_path'], split)
+    mix_dir = os.path.join(split_dir, 'mix_clean')
+    s1_dir = os.path.join(split_dir, 's1')
+    s2_dir = os.path.join(split_dir, 's2')
     
-    # 输出目录
-    output_dir = os.path.join(
-        dataset_config['processed_data_path'],
-        f'mixed/{split}'
-    )
-    mixture_dir = os.path.join(output_dir, 'mixture')
-    clean_dir = os.path.join(output_dir, 'clean')
+    # 元数据目录在 /metadata 下
+    metadata_dir = os.path.join(dataset_config['processed_data_path'], 'metadata')
     
-    os.makedirs(mixture_dir, exist_ok=True)
-    os.makedirs(clean_dir, exist_ok=True)
+    # 创建所有必要的目录
+    os.makedirs(mix_dir, exist_ok=True)
+    os.makedirs(s1_dir, exist_ok=True)
+    os.makedirs(s2_dir, exist_ok=True)
+    os.makedirs(metadata_dir, exist_ok=True)
     
     # 准备说话人列表
     speakers = list(speaker_utterances.keys())
     
     print(f"\nGenerating {num_samples} {split} samples...")
-    print(f"Output directory: {output_dir}")
+    print(f"Output directory: {split_dir}")
     print(f"Available speakers: {len(speakers)}")
     
-    # 保存元数据
+    # 保存CSV元数据
     metadata = []
     
     for i in tqdm(range(num_samples)):
@@ -242,6 +259,10 @@ def generate_mixture_dataset(config, speaker_utterances, num_samples=100, split=
             # 随机选择每个说话人的一个语音文件
             audio_path1 = random.choice(speaker_utterances[speaker1])
             audio_path2 = random.choice(speaker_utterances[speaker2])
+            
+            # 为每个样本随机选择长度
+            audio_length = random.uniform(audio_length_range[0], audio_length_range[1])
+            target_length = int(sample_rate * audio_length)
             
             # 加载并处理音频（不归一化）
             audio1 = load_and_resample_audio(audio_path1, sample_rate, target_length)
@@ -270,43 +291,47 @@ def generate_mixture_dataset(config, speaker_utterances, num_samples=100, split=
             energy2 = torch.sum(sources_norm[1] ** 2).item()
             actual_snr = 10 * torch.log10(torch.tensor(energy1 / (energy2 + 1e-8))).item()
             
-            # 保存
-            base_name = f"sample_{i:04d}"
+            # 按 wsj0-2mix 格式保存文件
+            # 生成唯一ID: speaker1-speaker2-索引
+            mix_id = f"{speaker1}-{speaker2}-{i:05d}"
             
-            # 混合音频（使用归一化后的）
-            mixture_path = os.path.join(mixture_dir, f"{base_name}.wav")
+            # 文件命名
+            filename = f"{mix_id}.wav"
+            
+            # 保存混合音频到 mix_clean 目录
+            mixture_path = os.path.join(mix_dir, filename)
             torchaudio.save(mixture_path, mixture_norm.unsqueeze(0), sample_rate)
             
-            # 干净音频（使用归一化后的）
-            s1_path = os.path.join(clean_dir, f"{base_name}_s1.wav")
-            s2_path = os.path.join(clean_dir, f"{base_name}_s2.wav")
+            # 保存源音频1和2到对应的 s1, s2 目录
+            s1_path = os.path.join(s1_dir, filename)
+            s2_path = os.path.join(s2_dir, filename)
             torchaudio.save(s1_path, sources_norm[0].unsqueeze(0), sample_rate)
             torchaudio.save(s2_path, sources_norm[1].unsqueeze(0), sample_rate)
             
-            # 记录元数据（包含验证信息）
+            # 记录CSV元数据 - 使用相对于 wav8k 目录的路径
+            # 格式: id, mix_wav.FILE, s1_wav.FILE, s2_wav.FILE, length
             metadata.append({
-                'sample_id': base_name,
-                'speaker1': speaker1,
-                'speaker2': speaker2,
-                'audio1_path': audio_path1,
-                'audio2_path': audio_path2,
-                'snr_db_target': float(snr_db),
-                'snr_db_actual': float(actual_snr),
-                'snr_error_db': float(abs(actual_snr - snr_db)),
-                'reconstruction_error': float(reconstruction_error),
-                'is_valid': bool(reconstruction_error < 1e-6 and abs(actual_snr - snr_db) < 0.5)
+                'id': mix_id,
+                'mix_wav:FILE': f"{split}/mix_clean/{filename}",
+                's1_wav:FILE': f"{split}/s1/{filename}",
+                's2_wav:FILE': f"{split}/s2/{filename}",
+                'length': target_length
             })
             
         except Exception as e:
             print(f"\n警告: 生成样本 {i} 时出错: {e}")
             continue
     
-    # 保存元数据
-    metadata_path = os.path.join(output_dir, 'metadata.json')
-    with open(metadata_path, 'w', encoding='utf-8') as f:
-        json.dump(metadata, f, indent=2, ensure_ascii=False)
+    # 保存CSV元数据（wsj0-2mix格式）
+    metadata_path = os.path.join(metadata_dir, f'{split}_metadata.csv')
+    with open(metadata_path, 'w', newline='', encoding='utf-8') as f:
+        if metadata:
+            fieldnames = ['id', 'mix_wav:FILE', 's1_wav:FILE', 's2_wav:FILE', 'length']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(metadata)
     
-    print(f"✓ Generated {len(metadata)} samples in {output_dir}")
+    print(f"✓ Generated {len(metadata)} samples in {split_dir}")
     print(f"✓ Metadata saved to {metadata_path}")
 
 
@@ -335,7 +360,11 @@ def main():
     parser.add_argument('--sample-rate', type=int, default=None,
                        help='Sample rate (override config)')
     parser.add_argument('--audio-length', type=float, default=None,
-                       help='Audio length in seconds (override config)')
+                       help='Fixed audio length in seconds (override config, will set both min and max to this value)')
+    parser.add_argument('--audio-length-min', type=float, default=None,
+                       help='Minimum audio length in seconds (override config)')
+    parser.add_argument('--audio-length-max', type=float, default=None,
+                       help='Maximum audio length in seconds (override config)')
     parser.add_argument('--snr-min', type=float, default=None,
                        help='Minimum SNR in dB (override config)')
     parser.add_argument('--snr-max', type=float, default=None,
@@ -366,17 +395,36 @@ def main():
     num_speakers = args.num_speakers if args.num_speakers is not None else dataset_config['num_speakers']
     num_utterances = args.num_utterances if args.num_utterances is not None else dataset_config['samples_per_speaker']
     
-    # 计算训练集和测试集样本数
+    # 计算训练集、验证集和测试集样本数
+    # wsj0-2mix 格式: train (训练), dev (验证), test (测试)
     total_samples = num_speakers * num_utterances
     train_ratio = dataset_config.get('train_ratio', 0.8)
+    dev_ratio = dataset_config.get('dev_ratio', 0.1)  # 验证集比例，默认10%
+    
     num_train = args.num_train if args.num_train is not None else int(total_samples * train_ratio)
-    num_test = args.num_test if args.num_test is not None else (total_samples - num_train)
+    num_dev = int(total_samples * dev_ratio)
+    num_test = args.num_test if args.num_test is not None else (total_samples - num_train - num_dev)
     
     # 音频参数
     if args.sample_rate is not None:
         dataset_config['sample_rate'] = args.sample_rate
+    
+    # 处理音频长度参数
     if args.audio_length is not None:
-        dataset_config['audio_length'] = args.audio_length
+        # 如果指定固定长度，设置为相同的最小和最大值
+        dataset_config['audio_length_range'] = [args.audio_length, args.audio_length]
+    elif args.audio_length_min is not None or args.audio_length_max is not None:
+        # 如果指定长度范围
+        if 'audio_length_range' in dataset_config:
+            length_min = args.audio_length_min if args.audio_length_min is not None else dataset_config['audio_length_range'][0]
+            length_max = args.audio_length_max if args.audio_length_max is not None else dataset_config['audio_length_range'][1]
+        else:
+            # 如果配置中没有范围，使用默认值或命令行参数
+            default_length = dataset_config.get('audio_length', 4.0)
+            length_min = args.audio_length_min if args.audio_length_min is not None else default_length
+            length_max = args.audio_length_max if args.audio_length_max is not None else default_length
+        dataset_config['audio_length_range'] = [length_min, length_max]
+    
     if args.snr_min is not None or args.snr_max is not None:
         snr_min = args.snr_min if args.snr_min is not None else dataset_config['snr_range'][0]
         snr_max = args.snr_max if args.snr_max is not None else dataset_config['snr_range'][1]
@@ -388,19 +436,30 @@ def main():
     torch.manual_seed(seed)
     
     print("=" * 80)
-    print("从 AISHELL-3 生成混合语音数据集")
+    print("从 AISHELL-3 生成混合语音数据集（wsj0-2mix 格式）")
     print("=" * 80)
     print(f"配置文件: {args.config}")
     print(f"AISHELL-3 路径: {dataset_config['raw_data_path']}")
     print(f"输出路径: {dataset_config['processed_data_path']}")
     print(f"采样率: {dataset_config['sample_rate']} Hz")
-    print(f"音频长度: {dataset_config['audio_length']} 秒")
+    
+    # 显示音频长度（支持固定长度和长度范围）
+    if 'audio_length_range' in dataset_config:
+        length_range = dataset_config['audio_length_range']
+        if length_range[0] == length_range[1]:
+            print(f"音频长度: {length_range[0]} 秒（固定）")
+        else:
+            print(f"音频长度范围: {length_range[0]} - {length_range[1]} 秒（随机）")
+    else:
+        print(f"音频长度: {dataset_config.get('audio_length', 4.0)} 秒")
+    
     print(f"SNR 范围: {dataset_config['snr_range']} dB")
     print(f"说话人数量: {num_speakers}")
     print(f"每个说话人的语音数量: {num_utterances}")
-    print(f"训练集比例: {train_ratio}")
-    print(f"训练样本: {num_train}")
-    print(f"测试样本: {num_test}")
+    print(f"数据集划分:")
+    print(f"  训练集(train): {num_train} 样本 ({train_ratio*100:.0f}%)")
+    print(f"  验证集(dev): {num_dev} 样本 ({dev_ratio*100:.0f}%)")
+    print(f"  测试集(test): {num_test} 样本 ({(1-train_ratio-dev_ratio)*100:.0f}%)")
     print(f"随机种子: {seed}")
     print()
     
@@ -416,20 +475,28 @@ def main():
     total_utterances = sum(len(files) for files in speaker_utterances.values())
     print(f"✓ 选择了 {len(speaker_utterances)} 个说话人，共 {total_utterances} 个语音文件")
     
-    # 生成训练集
-    print("\n步骤 2: 生成训练集...")
+    # 生成训练集 (train)
+    print("\n步骤 2: 生成训练集 (train)...")
     generate_mixture_dataset(config, speaker_utterances, num_samples=num_train, split='train')
     
-    # 生成测试集
-    print("\n步骤 3: 生成测试集...")
+    # 生成验证集 (dev)
+    print("\n步骤 3: 生成验证集 (dev)...")
+    generate_mixture_dataset(config, speaker_utterances, num_samples=num_dev, split='dev')
+    
+    # 生成测试集 (test)
+    print("\n步骤 4: 生成测试集 (test)...")
     generate_mixture_dataset(config, speaker_utterances, num_samples=num_test, split='test')
     
     print("\n" + "=" * 80)
     print("数据集生成完成!")
     print("=" * 80)
-    print(f"训练样本: {num_train}")
-    print(f"测试样本: {num_test}")
-    print(f"数据位置: {dataset_config['processed_data_path']}/mixed/")
+    sr_folder = f"wav{dataset_config['sample_rate']//1000}k"
+    output_path = os.path.join(dataset_config['processed_data_path'], sr_folder)
+    print(f"训练集(train): {num_train} 样本")
+    print(f"验证集(dev): {num_dev} 样本")
+    print(f"测试集(test): {num_test} 样本")
+    print(f"数据位置: {output_path}/")
+    print(f"元数据位置: {output_path}/metadata/")
     print("\n可以运行以下命令开始训练:")
     print("python scripts/3_train.py")
 

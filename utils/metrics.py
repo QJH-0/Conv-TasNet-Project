@@ -210,9 +210,10 @@ def evaluate_separation(model, dataloader, device='cuda', metrics=['si_sdr']):
     num_samples = 0
     
     with torch.no_grad():
-        for mixtures, targets in dataloader:
-            mixtures = mixtures.to(device)
-            targets = targets.to(device)
+        for batch in dataloader:
+            # 数据格式转换（新格式 → 旧格式）
+            mixtures = batch['mix'].to(device)
+            targets = torch.stack(batch['ref'], dim=1).to(device)
             
             # 模型预测
             estimations = model(mixtures)  # [B, C, T]
