@@ -466,6 +466,38 @@ def create_dataloader(data_dir, is_train=True, batch_size=16, num_workers=4,
     return dataloader
 
 
+def get_dataloader(data_path, batch_size, num_workers, shuffle, split, 
+                   chunk_size=32000, use_all_chunks=True):
+    """
+    别名函数，用于兼容训练脚本中的调用
+    
+    Args:
+        data_path: 数据根目录路径 (例如: 'data/processed1000')
+        batch_size: batch大小
+        num_workers: 工作进程数
+        shuffle: 是否打乱数据
+        split: 数据集划分 ('train', 'dev', 'test')
+        chunk_size: 切片长度
+        use_all_chunks: 是否使用所有切片
+    
+    Returns:
+        CustomDataLoader对象
+    """
+    # 构建完整路径
+    data_dir = os.path.join(data_path, split)
+    
+    # 调用create_dataloader
+    return create_dataloader(
+        data_dir=data_dir,
+        is_train=shuffle,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        sample_rate=8000,  # 默认采样率
+        chunk_size=chunk_size,
+        use_all_chunks=use_all_chunks
+    )
+
+
 if __name__ == "__main__":
     # 测试代码
     print("Testing DataLoader...")

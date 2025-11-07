@@ -13,8 +13,10 @@ librosa>=0.8.0
 soundfile>=0.10.0
 
 # 评估指标
+asteroid>=0.6.0  # 自动 PIT + 多指标计算
+pystoi>=0.3.3  # STOI 指标（纯 Python，无需编译）
 mir_eval>=0.7  # BSS Eval 标准实现
-# pesq>=0.0.3  # 可选：需要额外安装
+# pesq>=0.0.3  # 需要编译工具，已用 pystoi 替代
 
 # 配置文件
 pyyaml>=5.4

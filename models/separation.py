@@ -79,13 +79,20 @@ class Separation(nn.Module):
             nn.Sigmoid()
         )
     
-    def forward(self, encoder_output):
+    def forward(self, encoder_output, return_intermediate=False):
         """
         Args:
             encoder_output: [B, N, K] - Encoder输出
+            return_intermediate: 是否返回中间特征（用于知识蒸馏）
         
         Returns:
-            masks: [B, C, N, K] - C个说话人的掩码
+            如果 return_intermediate=False:
+                masks: [B, C, N, K] - C个说话人的掩码
+            如果 return_intermediate=True:
+                dict: {
+                    'masks': [B, C, N, K],
+                    'tcn_features': List[[B, Sc, K]] - 每个TCN块的skip输出
+                }
         """
         batch_size = encoder_output.shape[0]
         num_filters = encoder_output.shape[1]
@@ -99,9 +106,14 @@ class Separation(nn.Module):
         
         # 通过R个TCN块，累积跳跃连接
         skip_sum = 0
+        tcn_features = []  # 保存中间特征
+        
         for tcn_block in self.tcn_blocks:
             x, skip = tcn_block(x)  # x: [B, B, K], skip: [B, Sc, K]
             skip_sum = skip_sum + skip
+            
+            if return_intermediate:
+                tcn_features.append(skip)
         
         # 生成掩码
         masks = self.mask_conv(skip_sum)  # [B, Sc, K] -> [B, C*N, K]
@@ -109,7 +121,13 @@ class Separation(nn.Module):
         # Reshape: [B, C*N, K] -> [B, C, N, K]
         masks = masks.view(batch_size, self.num_speakers, num_filters, seq_len)
         
-        return masks
+        if return_intermediate:
+            return {
+                'masks': masks,
+                'tcn_features': tcn_features
+            }
+        else:
+            return masks
 
 
 if __name__ == "__main__":

@@ -1,2 +1,3 @@
 loadPath:
   config: "./config/config.yml"
+  pre_config: "./config/bconfig.yml"

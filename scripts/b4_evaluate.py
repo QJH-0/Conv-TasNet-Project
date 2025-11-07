@@ -244,32 +244,58 @@ def main():
     logger.info(f"Use all chunks: {use_all_chunks}")
     logger.info(f"Test batches: {len(test_loader)}")
     
-    # 评估
-    logger.info("\nEvaluating BTCN model...")
-    metrics = evaluate_separation(model, test_loader, device)
+    # 从配置读取评估设置
+    eval_config = config.get('evaluation', {})
+    enabled_metrics = eval_config.get('metrics', {}).get('enabled', ['si_sdr', 'sdr', 'sir', 'sar'])
+    use_asteroid = eval_config.get('use_asteroid', True)
+    include_stoi = eval_config.get('include_stoi', False)
     
-    # 打印结果
+    # 评估（使用 Asteroid 自动 PIT + 误差分解）
+    logger.info("\nEvaluating BTCN model...")
+    logger.info(f"Enabled metrics: {enabled_metrics}")
+    metrics = evaluate_separation(
+        model, 
+        test_loader, 
+        device,
+        metrics=enabled_metrics,
+        use_asteroid=use_asteroid,
+        include_stoi=include_stoi
+    )
+    
+    # 打印结果（包含误差分解）
     print("\n" + "=" * 80)
-    print("BTCN Evaluation Results - SI-SDR")
+    print("BTCN Evaluation Results (Asteroid 自动 PIT + 误差分解)")
     print("=" * 80)
-    print(f"  SI-SDR (Scale-Invariant Signal-to-Distortion Ratio): {metrics['si_sdr']:.2f} dB")
+    print(f"  SI-SDR (Scale-Invariant Signal-to-Distortion Ratio): {metrics.get('si_sdr', 0):.2f} dB")
+    print(f"  SDR (Signal-to-Distortion Ratio): {metrics.get('sdr', 0):.2f} dB")
+    print(f"  SIR (Source-to-Interference Ratio): {metrics.get('sir', 0):.2f} dB")
+    print(f"  SAR (Sources-to-Artifacts Ratio): {metrics.get('sar', 0):.2f} dB")
+    if 'si_sdri' in metrics:
+        print(f"  SI-SDRi (SI-SDR Improvement): {metrics['si_sdri']:.2f} dB")
     print("=" * 80)
     print("Model Efficiency:")
     print(f"  Model Size (Binary): {model_size_binary:.2f} MB")
     print(f"  Compression Ratio: {model_size_fp32/model_size_binary:.2f}x")
     print(f"  Binary Parameters: {binary_params/total_params*100:.1f}%")
     print("=" * 80)
-    print("说明:")
-    print("  • SI-SDR: 衡量分离信号的质量，越大越好")
-    print("  • SI-SDR > 10 dB 表示良好分离")
-    print("  • SI-SDR > 15 dB 表示优秀分离")
+    print("指标说明:")
+    print("  • SI-SDR: 尺度不变信号失真比 (目标 > 10 dB, 优秀 > 15 dB)")
+    print("  • SDR: 信号失真比 (BSS Eval 标准)")
+    print("  • SIR: 信号干扰比 (衡量串扰抑制能力)")
+    print("  • SAR: 信号伪影比 (衡量算法失真)")
+    print("  • 误差分解: SDR ≈ SIR + SAR")
     print("  • 二值化模型性能通常略低于全精度模型")
     print("  • 可以通过知识蒸馏进一步提升性能")
     print("=" * 80)
     
     # 记录日志
-    logger.info("\nEvaluation Results - SI-SDR:")
-    logger.info(f"  SI-SDR (Scale-Invariant Signal-to-Distortion Ratio): {metrics['si_sdr']:.2f} dB")
+    logger.info("\nEvaluation Results (Asteroid 自动 PIT + 误差分解):")
+    logger.info(f"  SI-SDR: {metrics.get('si_sdr', 0):.2f} dB")
+    logger.info(f"  SDR: {metrics.get('sdr', 0):.2f} dB")
+    logger.info(f"  SIR: {metrics.get('sir', 0):.2f} dB (串扰抑制)")
+    logger.info(f"  SAR: {metrics.get('sar', 0):.2f} dB (算法失真)")
+    if 'si_sdri' in metrics:
+        logger.info(f"  SI-SDRi: {metrics['si_sdri']:.2f} dB")
     
     # 保存结果
     result_dir = config['logging']['result_dir']

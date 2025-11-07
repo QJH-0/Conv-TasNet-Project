@@ -4,15 +4,15 @@
 dataset:
   name: "AISHELL-3"
   raw_data_path: "D:\\Paper\\datasets\\AISHELL-3"
-  processed_data_path: "data/processed1000_20db"
+  processed_data_path: "data/processed2000"
   
   # wsj0-2mix / Libri2Mix 标准数据集路径
   # 注意：Windows路径使用双反斜杠 \\ 或正斜杠 /
-  data_path: "data/processed1000"
+  data_path: "data/processed2000"
 #  data_path: "D:/Paper/datasets/Libri2Mix_8k"
 
   # 数据生成参数
-  num_speakers: 20                    # 选择的说话人数量
+  num_speakers: 50                    # 选择的说话人数量
   samples_per_speaker: 50            # 每位说话人的语音数量
   train_ratio: 0.8                    # 训练集比例
   dev_ratio: 0.1                      # 验证集比例 (dev)
@@ -30,33 +30,33 @@ dataset:
   use_all_chunks: true               # 是否使用所有切片（True: 每个样本切成多个chunk，数据量翻倍；False: 每个样本只使用一个chunk）
   
   # wsj0-2mix 标准目录结构
-  # 训练集: {data_path}/train/
-  # 验证集: {data_path}/dev/
-  # 测试集: {data_path}/test/
-  # 元数据: {data_path}/metadata/
+  # 训练集: {data_path}/wav8k/train/
+  # 验证集: {data_path}/wav8k/dev/
+  # 测试集: {data_path}/wav8k/test/
+  # 元数据: {data_path}/wav8k/metadata/
 
 # 模型配置
 model:
   name: "Conv-TasNet"
   encoder:
-    num_filters: 128                  # N: 编码器滤波器数量 (减少以节省显存)
-    kernel_size: 40                   # L: 卷积核大小
+    num_filters: 512                  # N: 编码器滤波器数量 (减少以节省显存)
+    kernel_size: 16                   # L: 卷积核大小
     stride: 8                         # 步长（50%重叠）
   
   separation:
     num_speakers: 2                   # C: 说话人数量
     bottleneck_channels: 128          # B: 瓶颈层通道数
-    hidden_channels: 256              # H: 隐藏层通道数 (减少以节省显存)
+    hidden_channels: 512              # H: 隐藏层通道数 (减少以节省显存)
     skip_channels: 128                # Sc: 跳跃连接通道数
     kernel_size: 3                    # P: 卷积核大小
-    num_blocks: 7                     # M: 每个TCN块的层数 (减少以节省显存)
-    num_repeats: 2                    # R: TCN块重复次数
+    num_blocks: 8                     # M: 每个TCN块的层数 (减少以节省显存)
+    num_repeats: 3                    # R: TCN块重复次数
     norm_type: "gLN"                  # 归一化类型（gLN/cLN/BN）
     causal: false                     # 是否因果卷积
   
   decoder:
-    num_filters: 128                  # N: 编码器滤波器数量 (减少以节省显存)
-    kernel_size: 40                   # 卷积核大小
+    num_filters: 512                  # N: 编码器滤波器数量 (减少以节省显存)
+    kernel_size: 16                   # 卷积核大小
     stride: 8                         # 步长
 
 # 训练配置
@@ -89,22 +89,10 @@ loss:
   type: "SI-SNR"                      # Scale-Invariant SNR
   use_pit: true                       # 使用 PIT (Permutation Invariant Training)
   
-# 评估配置
-evaluation:
-  # 评估指标配置（使用 Asteroid + PySTOI）
-  metrics:
-    enabled: ['si_sdr', 'sdr', 'sir', 'sar']  # 启用的指标列表
-    # 可选: 'si_sdr', 'sdr', 'sir', 'sar', 'stoi', 'si_sdri'
-    
-  use_asteroid: true                  # 使用 Asteroid 库（自动 PIT）
-  include_stoi: false                 # 是否计算 STOI（可懂度，纯Python）
-  
-  # 可视化配置
-  plot_metrics: ['si_sdr', 'sdr', 'sir', 'sar']  # 在图表中显示的指标
-  
 # 验证配置
 validation:
   batch_size: 1                       # 减少batch size以适应显存
+  metrics: ["SI-SDR"]                 # 使用 SI-SDR 作为评估指标
   
 # 设备配置
 device:
@@ -115,10 +103,10 @@ device:
   
 # 日志与保存
 logging:
-  log_dir: "experiments/exp_1000_test/logs"
-  checkpoint_dir: "experiments/exp_1000_test/checkpoints"
-  checkpoint_dir_load: "experiments/exp_1000_test/checkpoints/best_model.pth"
-  result_dir: "experiments/exp_1000_test/results"
+  log_dir: "experiments/exp_2000/logs"
+  checkpoint_dir: "experiments/exp_2000/checkpoints/"
+  checkpoint_dir_load: "experiments/exp_10000_8.9/checkpoints/best_model.pth"
+  result_dir: "experiments/exp_2000/results"
   save_interval: 5                    # 每5个epoch保存一次
   visualize: true                     # 是否可视化
   tensorboard: true                   # 是否使用tensorboard

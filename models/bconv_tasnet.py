@@ -75,13 +75,20 @@ class BSeparation(nn.Module):
             nn.Sigmoid()
         )
     
-    def forward(self, encoder_output):
+    def forward(self, encoder_output, return_intermediate=False):
         """
         Args:
             encoder_output: [B, N, K] - Encoder输出
+            return_intermediate: 是否返回中间特征（用于知识蒸馏）
         
         Returns:
-            masks: [B, C, N, K] - C个说话人的掩码
+            如果 return_intermediate=False:
+                masks: [B, C, N, K] - C个说话人的掩码
+            如果 return_intermediate=True:
+                dict: {
+                    'masks': [B, C, N, K],
+                    'tcn_features': List[[B, Sc, K]] - 每个BTCN块的skip输出
+                }
         """
         batch_size = encoder_output.shape[0]
         num_filters = encoder_output.shape[1]
@@ -95,9 +102,14 @@ class BSeparation(nn.Module):
         
         # 通过R个BTCN块，累积跳跃连接
         skip_sum = 0
+        tcn_features = []  # 保存中间特征
+        
         for btcn_block in self.btcn_blocks:
             x, skip = btcn_block(x)  # x: [B, B, K], skip: [B, Sc, K]
             skip_sum = skip_sum + skip
+            
+            if return_intermediate:
+                tcn_features.append(skip)
         
         # 生成掩码
         masks = self.mask_conv(skip_sum)  # [B, Sc, K] -> [B, C*N, K]
@@ -105,7 +117,13 @@ class BSeparation(nn.Module):
         # Reshape: [B, C*N, K] -> [B, C, N, K]
         masks = masks.view(batch_size, self.num_speakers, num_filters, seq_len)
         
-        return masks
+        if return_intermediate:
+            return {
+                'masks': masks,
+                'tcn_features': tcn_features
+            }
+        else:
+            return masks
 
 
 class BConvTasNet(nn.Module):
@@ -190,15 +208,24 @@ class BConvTasNet(nn.Module):
             stride=encoder_stride
         )
     
-    def forward(self, mixture):
+    def forward(self, mixture, return_intermediate=False):
         """
         前向传播
         
         Args:
             mixture: [B, T] - 混合波形
+            return_intermediate: 是否返回中间特征（用于知识蒸馏）
         
         Returns:
-            separated_sources: [B, C, T] - 分离后的C个说话人波形
+            如果 return_intermediate=False:
+                separated_sources: [B, C, T] - 分离后的C个说话人波形
+            如果 return_intermediate=True:
+                dict: {
+                    'output': [B, C, T] - 分离的语音波形,
+                    'encoder_output': [B, N, K] - 编码器输出,
+                    'tcn_features': List[[B, Sc, K]] - BTCN特征列表,
+                    'masks': [B, C, N, K] - 掩码
+                }
         """
         batch_size = mixture.shape[0]
         mixture_length = mixture.shape[-1]
@@ -207,7 +234,12 @@ class BConvTasNet(nn.Module):
         encoder_output = self.encoder(mixture)  # [B, T] -> [B, N, K]
         
         # 2. Separation: 特征 → 掩码
-        masks = self.separation(encoder_output)  # [B, N, K] -> [B, C, N, K]
+        if return_intermediate:
+            separation_output = self.separation(encoder_output, return_intermediate=True)
+            masks = separation_output['masks']
+            tcn_features = separation_output['tcn_features']
+        else:
+            masks = self.separation(encoder_output)  # [B, N, K] -> [B, C, N, K]
         
         # 3. 掩码相乘: w ⊙ m_i
         masked_features = encoder_output.unsqueeze(1) * masks  # [B, C, N, K]
@@ -225,7 +257,15 @@ class BConvTasNet(nn.Module):
         # 5. 裁剪或填充到原始长度
         separated_sources = self._pad_or_trim(separated_sources, mixture_length)
         
-        return separated_sources
+        if return_intermediate:
+            return {
+                'output': separated_sources,
+                'encoder_output': encoder_output,
+                'tcn_features': tcn_features,
+                'masks': masks
+            }
+        else:
+            return separated_sources
     
     def _pad_or_trim(self, sources, target_length):
         """

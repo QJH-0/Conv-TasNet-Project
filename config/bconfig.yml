@@ -19,7 +19,11 @@ dataset:
   train_ratio: 0.8                    # 训练集比例
   dev_ratio: 0.1                      # 验证集比例 (dev)
   sample_rate: 8000                   # 采样率 (8kHz for wsj0-2mix/Libri2Mix_8k)
-  snr_range: [-3, 3]                  # 信噪比范围（dB）
+  snr_range: [0, 20]          # WSJ0-2mix / Libri2Mix 标准
+
+  # 进阶：极限测试（仅验证集）
+  # snr_range_train: [0, 20]
+  # snr_range_val:   [-3, 3]
   audio_length_range: [2.0, 6.0]      # 音频长度范围（秒）[最小值, 最大值]
   
   # 数据加载参数（wsj0-2mix标准格式）
@@ -80,31 +84,43 @@ loss:
   type: "SI-SNR"                      # Scale-Invariant SNR
   use_pit: true                       # 使用 PIT (Permutation Invariant Training)
   
-  # 知识蒸馏配置 (暂时不启用)
-  distillation:
-    enabled: false                    # 是否启用知识蒸馏
-    teacher_checkpoint: null          # 教师模型检查点路径
-    temperature: 1.0                  # 蒸馏温度
+#  # 知识蒸馏配置 (暂时不启用)
+#  distillation:
+#    enabled: false                    # 是否启用知识蒸馏
+#    teacher_checkpoint: null          # 教师模型检查点路径
+#    temperature: 1.0                  # 蒸馏温度
+#
+#    # 损失权重 (λ1-λ5)
+#    weights:
+#      spec_loss: 0.2                  # λ1: 输出波形蒸馏损失
+#      encoder_loss: 0.1               # λ2: 编码器输出蒸馏损失
+#      tcn_loss: 0.1                   # λ3: TCN特征图平均蒸馏损失
+#      mask_loss: 0.2                  # λ4: 掩码蒸馏损失
+#      task_loss: 0.4                  # λ5: 任务损失 (SI-SNR)
+#
+#    # 权重调整策略
+#    weight_schedule:
+#      type: "dynamic"                 # dynamic: 动态调整, static: 固定权重
+#      initial_task_weight: 0.2        # 初始任务损失权重
+#      final_task_weight: 0.8          # 最终任务损失权重
+#      warmup_epochs: 50               # 权重调整的预热轮数
+#
+# 评估配置
+evaluation:
+  # 评估指标配置（使用 Asteroid + PySTOI）
+  metrics:
+    enabled: ['si_sdr', 'sdr', 'sir', 'sar']  # 启用的指标列表
+    # 可选: 'si_sdr', 'sdr', 'sir', 'sar', 'stoi', 'si_sdri'
     
-    # 损失权重 (λ1-λ5)
-    weights:
-      spec_loss: 0.2                  # λ1: 输出波形蒸馏损失
-      encoder_loss: 0.1               # λ2: 编码器输出蒸馏损失
-      tcn_loss: 0.1                   # λ3: TCN特征图平均蒸馏损失
-      mask_loss: 0.2                  # λ4: 掩码蒸馏损失
-      task_loss: 0.4                  # λ5: 任务损失 (SI-SNR)
-    
-    # 权重调整策略
-    weight_schedule:
-      type: "dynamic"                 # dynamic: 动态调整, static: 固定权重
-      initial_task_weight: 0.2        # 初始任务损失权重
-      final_task_weight: 0.8          # 最终任务损失权重
-      warmup_epochs: 50               # 权重调整的预热轮数
+  use_asteroid: true                  # 使用 Asteroid 库（自动 PIT）
+  include_stoi: false                 # 是否计算 STOI（可懂度，纯Python）
+  
+  # 可视化配置
+  plot_metrics: ['si_sdr', 'sdr', 'sir', 'sar']  # 在图表中显示的指标
   
 # 验证配置
 validation:
   batch_size: 2                       # 验证batch size
-  metrics: ["SI-SDR", "SDR", "SAR", "SIR"]  # 评估指标
   
 # 设备配置
 device:

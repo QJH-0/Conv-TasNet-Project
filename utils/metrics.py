@@ -1,341 +1,340 @@
 """
-语音分离评估指标计算 - SI-SDR
+语音分离评估指标计算 - 基于 Asteroid 库
 
-本模块实现了语音分离任务中的核心评价指标：
+本模块使用 asteroid 库实现语音分离任务的评估指标：
 
 SI-SDR (Scale-Invariant Signal-to-Distortion Ratio) - 尺度不变信号失真比
    - 核心思想: 消除信号幅度缩放的影响，专注于波形结构相似性
    - 适用场景: 端到端语音分离，对幅度不敏感的场景
-   - 计算特点: 零均值化 + 尺度不变投影
-   - 计算步骤: 先零均值化 → 投影 → 计算 SDR
+   
+SDR (Signal-to-Distortion Ratio) - 信号失真比
+   - 标准的 BSS Eval 指标
+   
+SIR (Source-to-Interference Ratio) - 信号干扰比
+   - 衡量其他声源的干扰程度
+   
+SAR (Sources-to-Artifacts Ratio) - 信号伪影比
+   - 衡量分离算法引入的失真
 
 评判标准:
 - SI-SDR: 越高越好，通常 > 10 dB 表示良好分离
+- SDR: 越高越好
+- SIR: 越高越好，衡量串扰抑制能力
+- SAR: 越高越好，衡量算法失真
 
-使用建议:
-- SI-SDR 是现代语音分离研究中最广泛使用的指标
-- Conv-TasNet 等现代方法主要使用 SI-SDR 作为评估标准
+优势:
+- 自动 PIT (排列不变训练) 匹配
+- 经过充分测试和优化
+- 支持批量处理
+- 完整的 BSS Eval 误差分解
 """
 
 import torch
 import numpy as np
-import itertools
+from typing import Dict, List, Union, Optional
+
+# Asteroid 库导入
+try:
+    from asteroid.metrics import get_metrics as asteroid_get_metrics
+    ASTEROID_AVAILABLE = True
+except ImportError:
+    ASTEROID_AVAILABLE = False
+    print("警告: asteroid 库未安装，将使用简化版指标计算")
+    print("请运行: pip install asteroid")
+
+# STOI 库导入（纯 Python，无需编译）
+try:
+    from pystoi import stoi as compute_stoi
+    STOI_AVAILABLE = True
+except ImportError:
+    STOI_AVAILABLE = False
+    # 不打印警告，因为 STOI 是可选的
 
 
-def calculate_si_sdr(estimation, target, eps=1e-8):
+# 注意：旧的手动实现已移除
+# 现在统一使用 Asteroid 库进行指标计算
+# 如需手动实现，请参考 git 历史或 Asteroid 源码
+
+
+def calculate_stoi(estimation, target, sample_rate=16000):
     """
-    计算 SI-SDR (Scale-Invariant Signal-to-Distortion Ratio) - 尺度不变信号失真比
+    计算 STOI (Short-Time Objective Intelligibility) - 短时客观可懂度
     
-    **核心思想**: 消除信号幅度缩放的影响，专注于信号波形结构的相似性
-    
-    **计算过程**:
-    1. 对分离信号和参考信号进行零均值化处理
-    2. 将分离信号投影到参考信号上，得到最优的尺度因子
-    3. 用这个尺度因子调整分离信号的幅度
-    4. 计算调整后的信号与参考信号之间的信号失真比
-    
-    公式: SI-SDR = 10 * log10(||s_target||² / ||e_noise||²)
-    其中: s_target = (<estimation, target> / ||target||²) * target
-         e_noise = estimation - s_target
-    
-    **关键特点**: 对信号的绝对幅度不敏感，只关注信号波形的相对形状
-    
-    Args:
-        estimation: [T] - 预测信号（分离后的信号）
-        target: [T] - 真实信号（纯净的目标语音）
-        eps: 数值稳定性常数
-    
-    Returns:
-        si_sdr: SI-SDR 值（dB），越大越好
-    """
-    # 转换为 torch tensor
-    if isinstance(estimation, np.ndarray):
-        estimation = torch.from_numpy(estimation).float()
-    if isinstance(target, np.ndarray):
-        target = torch.from_numpy(target).float()
-    
-    # 步骤1: 零均值化（去除直流分量）
-    # 这是尺度不变性的关键步骤，确保只关注波形形状
-    estimation = estimation - torch.mean(estimation)
-    target = target - torch.mean(target)
-    
-    # 步骤2: 将分离信号投影到参考信号上，得到最优尺度因子
-    # s_target = (<estimation, target> / ||target||²) * target
-    # 这里的尺度因子 α = <estimation, target> / ||target||²
-    inner_product = torch.sum(estimation * target)
-    target_norm_square = torch.sum(target ** 2) + eps
-    scale_factor = inner_product / target_norm_square
-    
-    # 步骤3: 用尺度因子调整后得到目标信号分量
-    s_target = scale_factor * target
-    
-    # 步骤4: 计算噪声/失真分量（分离信号与目标分量的差异）
-    e_noise = estimation - s_target
-    
-    # 步骤5: 计算信号失真比（目标信号能量 vs 噪声能量）
-    target_power = torch.sum(s_target ** 2) + eps
-    noise_power = torch.sum(e_noise ** 2) + eps
-    si_sdr = 10 * torch.log10(target_power / noise_power)
-    
-    return si_sdr.item()
-
-
-def calculate_sdr(estimation, target, eps=1e-8):
-    """
-    计算 SDR (Signal-to-Distortion Ratio) - 信号失真比
+    STOI 是一个纯 Python 实现的语音质量指标，无需编译。
+    它衡量语音的可懂度（intelligibility），范围 0-1，越高越好。
     
     Args:
         estimation: [T] - 预测信号
         target: [T] - 真实信号
-        eps: 数值稳定性常数
+        sample_rate: 采样率
     
     Returns:
-        sdr: SDR 值（dB），越大越好
+        stoi: STOI 值（0-1），越大越好，通常 > 0.9 表示良好
     """
-    # 转换为 torch tensor
-    if isinstance(estimation, np.ndarray):
-        estimation = torch.from_numpy(estimation).float()
-    if isinstance(target, np.ndarray):
-        target = torch.from_numpy(target).float()
+    if not STOI_AVAILABLE:
+        return 0.0
     
-    # 投影（不进行零均值化）
-    inner_product = torch.sum(estimation * target)
-    target_norm_square = torch.sum(target ** 2) + eps
-    scale_factor = inner_product / target_norm_square
-    s_target = scale_factor * target
+    # 转换为 numpy
+    if isinstance(estimation, torch.Tensor):
+        estimation = estimation.cpu().numpy()
+    if isinstance(target, torch.Tensor):
+        target = target.cpu().numpy()
     
-    # 噪声
-    e_noise = estimation - s_target
-    
-    # SDR
-    target_power = torch.sum(s_target ** 2) + eps
-    noise_power = torch.sum(e_noise ** 2) + eps
-    sdr = 10 * torch.log10(target_power / noise_power)
-    
-    return sdr.item()
+    try:
+        # pystoi 需要 1D 数组
+        stoi_score = compute_stoi(target, estimation, sample_rate, extended=False)
+        return float(stoi_score)
+    except Exception as e:
+        print(f"警告: STOI 计算失败 - {e}")
+        return 0.0
 
 
-def calculate_si_sdri(estimation, target, mixture, eps=1e-8):
+def calculate_metrics_asteroid(estimations, targets, mixtures=None, 
+                               sample_rate=16000,
+                               metrics_list=['si_sdr', 'sdr', 'sir', 'sar'],
+                               include_stoi=False):
     """
-    计算 SI-SDRi (SI-SDR improvement) - SI-SDR 改善量
+    使用 Asteroid 库计算语音分离评估指标（自动 PIT + 误差分解）
     
-    SI-SDRi = SI-SDR(分离信号, 目标信号) - SI-SDR(混合信号, 目标信号)
+    Asteroid 的优势:
+       - 自动处理 PIT（排列不变训练）匹配
+       - 完整的 BSS Eval 误差分解 (SDR = SIR + SAR + ...)
+       - 经过充分测试和优化
+       - 支持批量处理
     
     Args:
-        estimation: [T] - 预测信号（分离后的信号）
-        target: [T] - 真实信号（纯净的目标语音）
-        mixture: [T] - 混合信号（输入信号）
-        eps: 数值稳定性常数
-    
+        estimations: [B, C, T] - 分离后的语音
+        targets: [B, C, T] - 真实目标语音
+        mixtures: [B, T] - 混合信号（可选，用于计算SI-SDRi）
+        sample_rate: 采样率
+        metrics_list: 要计算的指标列表，可选 ['si_sdr', 'sdr', 'sir', 'sar']
+        include_stoi: 是否计算 STOI 指标（纯 Python，无需编译）
+        
     Returns:
-        si_sdri: SI-SDRi 值（dB），越大越好
+        metrics_dict: {
+            'si_sdr': 平均SI-SDR (dB),
+            'sdr': 平均SDR (dB),
+            'sir': 平均SIR (dB),
+            'sar': 平均SAR (dB),
+            'stoi': 平均STOI (0-1, 可选),
+            ...
+        }
     """
-    # 计算分离后的 SI-SDR
-    si_sdr_separated = calculate_si_sdr(estimation, target, eps)
+    if not ASTEROID_AVAILABLE:
+        raise ImportError("Asteroid 库未安装。请运行: pip install asteroid")
     
-    # 计算混合信号的 SI-SDR（基准）
-    si_sdr_mixture = calculate_si_sdr(mixture, target, eps)
+    # 转换为 numpy (asteroid 需要 numpy 格式)
+    if isinstance(estimations, torch.Tensor):
+        estimations = estimations.cpu().numpy()
+    if isinstance(targets, torch.Tensor):
+        targets = targets.cpu().numpy()
+    if mixtures is not None and isinstance(mixtures, torch.Tensor):
+        mixtures = mixtures.cpu().numpy()
     
-    # 计算改善量
-    si_sdri = si_sdr_separated - si_sdr_mixture
+    batch_size = estimations.shape[0]
     
-    return si_sdri
-
-
-
-
-
-def calculate_pit_si_sdr(estimations, targets):
-    """
-    使用 PIT 方式计算 SI-SDR 评估指标
+    # 对每个样本计算指标
+    all_metrics = {metric: [] for metric in metrics_list}
+    if include_stoi and STOI_AVAILABLE:
+        all_metrics['stoi'] = []
     
-    Args:
-        estimations: [C, T] - C 个分离的语音
-        targets: [C, T] - C 个真实语音
+    for i in range(batch_size):
+        est = estimations[i]  # [C, T]
+        tgt = targets[i]      # [C, T]
+        
+        # 准备混合信号
+        if mixtures is not None:
+            mix = mixtures[i]  # [T]
+        else:
+            # 如果没有提供混合信号，使用目标信号的和作为近似
+            mix = np.sum(tgt, axis=0)
+        
+        # 使用 asteroid 计算指标（自动 PIT）
+        # 注意: 不在 metrics_list 中包含 'stoi'，因为我们手动计算
+        asteroid_metrics_list = [m for m in metrics_list if m != 'stoi']
+        metrics = asteroid_get_metrics(
+            mix=mix,
+            clean=tgt,
+            estimate=est,
+            sample_rate=sample_rate,
+            metrics_list=asteroid_metrics_list,
+            average=True  # 自动平均多说话人
+        )
+        
+        # 累积 asteroid 指标结果
+        for metric in asteroid_metrics_list:
+            if metric in metrics:
+                all_metrics[metric].append(metrics[metric])
+        
+        # 手动计算 STOI（纯 Python，无需编译）
+        if include_stoi and STOI_AVAILABLE:
+            # 对每个说话人计算 STOI 后平均
+            stoi_scores = []
+            num_speakers = est.shape[0]
+            for spk in range(num_speakers):
+                stoi_score = calculate_stoi(est[spk], tgt[spk], sample_rate)
+                stoi_scores.append(stoi_score)
+            all_metrics['stoi'].append(np.mean(stoi_scores))
     
-    Returns:
-        best_si_sdr: 最优排列下的平均 SI-SDR
-        best_perm: 最优排列
-    """
-    num_speakers = estimations.shape[0]
-    perms = list(itertools.permutations(range(num_speakers)))
+    # 计算批次平均
+    avg_metrics = {
+        metric: np.mean(values) if values else 0.0
+        for metric, values in all_metrics.items()
+    }
     
-    perm_metrics = []
-    for perm in perms:
-        perm_metric = 0
-        for est_idx, tgt_idx in enumerate(perm):
-            metric = calculate_si_sdr(
-                estimations[est_idx], 
-                targets[tgt_idx]
+    # 如果提供了混合信号，添加 SI-SDRi
+    if mixtures is not None and 'si_sdr' in metrics_list:
+        si_sdri_list = []
+        for i in range(batch_size):
+            mix = mixtures[i]
+            tgt = targets[i]
+            
+            # 计算混合信号的基准 SI-SDR
+            mix_metrics = asteroid_get_metrics(
+                mix=mix,
+                clean=tgt,
+                estimate=np.stack([mix] * tgt.shape[0]),  # 重复混合信号
+                sample_rate=sample_rate,
+                metrics_list=['si_sdr'],
+                average=True
             )
-            perm_metric += metric
-        perm_metrics.append(perm_metric / num_speakers)
+            
+            si_sdri = avg_metrics['si_sdr'] - mix_metrics['si_sdr']
+            si_sdri_list.append(si_sdri)
+        
+        avg_metrics['si_sdri'] = np.mean(si_sdri_list)
     
-    # SI-SDR 越大越好，选择最大值
-    best_metric = max(perm_metrics)
-    best_perm_idx = perm_metrics.index(best_metric)
-    
-    return best_metric, perms[best_perm_idx]
+    return avg_metrics
 
 
-def evaluate_separation(model, dataloader, device='cuda', metrics=['si_sdr']):
+def calculate_metrics(estimations, targets, mixtures=None, 
+                     metrics_list=['si_sdr', 'sdr', 'sir', 'sar'],
+                     use_asteroid=True, include_stoi=False):
     """
-    评估模型在数据集上的表现（使用 PIT + 多指标）
+    计算语音分离评估指标（统一接口）
     
-    本函数对数据集中的每个样本进行评估，使用排列不变训练(PIT)方法
-    自动找到最优的输出-目标匹配，然后计算多种评估指标。
-    
-    支持的指标:
-       - SI-SDR: 尺度不变信号失真比，对幅度缩放不敏感
-       - SDR: 信号失真比
-       - SI-SDRi: SI-SDR改善量（相对于混合信号）
+    **强烈推荐使用 Asteroid 库**：自动 PIT + 完整误差分解
     
     Args:
-        model: Conv-TasNet 模型（或其他语音分离模型）
-        dataloader: 数据加载器，产生 (mixtures, targets) 批次
-        device: 计算设备 ('cuda' 或 'cpu')
-        metrics: 要计算的指标列表 ['si_sdr', 'sdr', 'si_sdri']
+        estimations: [B, C, T] - 分离后的语音
+        targets: [B, C, T] - 真实目标语音
+        mixtures: [B, T] - 混合信号（可选，用于计算SI-SDRi）
+        metrics_list: 要计算的指标列表，默认 ['si_sdr', 'sdr', 'sir', 'sar']
+        use_asteroid: 是否使用 asteroid 库（默认 True，强烈推荐）
+        include_stoi: 是否计算 STOI 指标（纯 Python，无需编译）
     
     Returns:
         metrics_dict: {
-            'si_sdr': 平均 SI-SDR（dB），越大越好
-            'sdr': 平均 SDR（dB），越大越好（如果请求）
-            'si_sdri': 平均 SI-SDRi（dB），越大越好（如果请求）
+            'si_sdr': 平均SI-SDR (dB),
+            'sdr': 平均SDR (dB),
+            'sir': 平均SIR (dB),
+            'sar': 平均SAR (dB),
+            'stoi': 平均STOI (0-1, 可选),
+            'si_sdri': 平均SI-SDRi (dB, 如果提供mixtures)
+        }
+    """
+    if not use_asteroid or not ASTEROID_AVAILABLE:
+        raise ImportError(
+            "Asteroid 库未安装或被禁用。\n"
+            "请安装: pip install asteroid\n"
+            "旧的手动实现已移除，请使用 Asteroid 库以获得：\n"
+            "  - 自动 PIT 匹配\n"
+            "  - 完整的 BSS Eval 误差分解 (SIR, SAR)\n"
+            "  - 经过充分测试和优化的实现"
+        )
+    
+    # 使用 asteroid 库（推荐）
+    return calculate_metrics_asteroid(
+        estimations, targets, mixtures,
+        metrics_list=metrics_list,
+        include_stoi=include_stoi
+    )
+
+
+# 旧的手动实现已移除
+# 现在统一使用 Asteroid 库，提供：
+# - 自动 PIT 匹配
+# - 完整的 BSS Eval 误差分解（SIR, SAR）
+# - 经过充分测试和优化
+# - 如果需要回退，请使用 use_asteroid=False（会抛出错误提示安装 asteroid）
+
+
+def evaluate_separation(model, dataloader, device='cuda', 
+                        metrics=['si_sdr', 'sdr', 'sir', 'sar'],
+                        use_asteroid=True,
+                        include_stoi=False):
+    """
+    评估模型在数据集上的表现（使用 Asteroid 自动 PIT + 多指标）
+    
+    本函数对数据集中的每个样本进行评估，使用 asteroid 库自动处理
+    排列不变训练(PIT)和误差分解。
+    
+    支持的指标:
+       - SI-SDR: 尺度不变信号失真比
+       - SDR: 信号失真比
+       - SIR: 信号干扰比（衡量串扰）
+       - SAR: 信号伪影比（衡量算法失真）
+       - STOI: 短时客观可懂度（纯 Python，无需编译）
+       - SI-SDRi: SI-SDR改善量
+    
+    Args:
+        model: 语音分离模型
+        dataloader: 数据加载器，产生 (mixtures, targets) 批次
+        device: 计算设备 ('cuda' 或 'cpu')
+        metrics: 要计算的指标列表
+        use_asteroid: 是否使用 asteroid 库
+        include_stoi: 是否计算 STOI 指标（纯 Python，无需编译）
+    
+    Returns:
+        metrics_dict: {
+            'si_sdr': 平均 SI-SDR（dB）
+            'sdr': 平均 SDR（dB）
+            'sir': 平均 SIR（dB）
+            'sar': 平均 SAR（dB）
+            'stoi': 平均 STOI（0-1，可选）
+            'si_sdri': 平均 SI-SDRi（dB）
         }
     """
     model.eval()
     
     # 初始化指标累加器
-    metric_accumulators = {metric: 0.0 for metric in metrics}
-    num_samples = 0
+    metric_accumulators = {metric: [] for metric in metrics}
+    if 'si_sdr' in metrics:
+        metric_accumulators['si_sdri'] = []
+    if include_stoi:
+        metric_accumulators['stoi'] = []
     
     with torch.no_grad():
         for batch in dataloader:
-            # 数据格式转换（新格式 → 旧格式）
+            # 数据格式转换
             mixtures = batch['mix'].to(device)
             targets = torch.stack(batch['ref'], dim=1).to(device)
             
             # 模型预测
             estimations = model(mixtures)  # [B, C, T]
             
-            # 对每个样本计算 PIT 指标
-            for i in range(mixtures.shape[0]):
-                est = estimations[i].cpu()   # [C, T]
-                tgt = targets[i].cpu()       # [C, T]
-                mix = mixtures[i].cpu()      # [T]
-                
-                # 使用 PIT 找到最优排列
-                num_speakers = est.shape[0]
-                perms = list(itertools.permutations(range(num_speakers)))
-                
-                # 计算所有排列的 SI-SDR（用于找最优排列）
-                perm_si_sdrs = []
-                for perm in perms:
-                    perm_si_sdr = 0
-                    for est_idx, tgt_idx in enumerate(perm):
-                        si_sdr = calculate_si_sdr(est[est_idx], tgt[tgt_idx])
-                        perm_si_sdr += si_sdr
-                    perm_si_sdrs.append(perm_si_sdr / num_speakers)
-                
-                # 找到最优排列
-                best_perm_idx = perm_si_sdrs.index(max(perm_si_sdrs))
-                best_perm = perms[best_perm_idx]
-                
-                # 根据最优排列计算各种指标
-                sample_metrics = {metric: 0.0 for metric in metrics}
-                
-                for est_idx, tgt_idx in enumerate(best_perm):
-                    if 'si_sdr' in metrics:
-                        sample_metrics['si_sdr'] += calculate_si_sdr(
-                            est[est_idx], tgt[tgt_idx]
-                        )
-                    if 'sdr' in metrics:
-                        sample_metrics['sdr'] += calculate_sdr(
-                            est[est_idx], tgt[tgt_idx]
-                        )
-                    if 'si_sdri' in metrics:
-                        sample_metrics['si_sdri'] += calculate_si_sdri(
-                            est[est_idx], tgt[tgt_idx], mix
-                        )
-                
-                # 平均并累加
-                for metric in metrics:
-                    metric_accumulators[metric] += sample_metrics[metric] / num_speakers
-                
-                num_samples += 1
+            # 计算指标（使用 Asteroid）
+            if not use_asteroid or not ASTEROID_AVAILABLE:
+                raise ImportError("Asteroid 库未安装。请运行: pip install asteroid")
+            
+            batch_metrics = calculate_metrics_asteroid(
+                estimations.cpu(),
+                targets.cpu(),
+                mixtures.cpu(),
+                metrics_list=metrics,
+                include_stoi=include_stoi
+            )
+            
+            # 累积结果
+            for metric, value in batch_metrics.items():
+                if metric in metric_accumulators:
+                    metric_accumulators[metric].append(value)
     
     # 计算平均值
     avg_metrics = {
-        metric: metric_accumulators[metric] / num_samples 
-        for metric in metrics
+        metric: np.mean(values) if values else 0.0
+        for metric, values in metric_accumulators.items()
     }
     
     return avg_metrics
 
-
-if __name__ == "__main__":
-    print("=" * 80)
-    print("语音分离评估指标测试 - SI-SDR")
-    print("=" * 80)
-    print("SI-SDR: 尺度不变信号失真比 - 衡量波形结构相似性")
-    print("=" * 80)
-    
-    # 创建测试数据
-    length = 16000
-    
-    # 模拟两个说话人的语音
-    speaker1 = torch.randn(length)
-    speaker2 = torch.randn(length)
-    mixture = speaker1 + speaker2
-    
-    print("\n场景 1: 完美分离")
-    print("-" * 80)
-    estimation = speaker1.clone()
-    si_sdr = calculate_si_sdr(estimation, speaker1)
-    print(f"  SI-SDR: {si_sdr:.2f} dB (应该非常高)")
-    
-    print("\n场景 2: 部分分离（70% 目标 + 30% 干扰）")
-    print("-" * 80)
-    estimation_partial = 0.7 * speaker1 + 0.3 * speaker2
-    si_sdr = calculate_si_sdr(estimation_partial, speaker1)
-    print(f"  SI-SDR: {si_sdr:.2f} dB")
-    
-    print("\n场景 3: 无分离（直接使用混合信号）")
-    print("-" * 80)
-    estimation_none = mixture.clone()
-    si_sdr = calculate_si_sdr(estimation_none, speaker1)
-    print(f"  SI-SDR: {si_sdr:.2f} dB (应该较低)")
-    
-    print("\n场景 4: 错误分离（输出错误的说话人）")
-    print("-" * 80)
-    estimation_wrong = speaker2.clone()
-    si_sdr = calculate_si_sdr(estimation_wrong, speaker1)
-    print(f"  SI-SDR: {si_sdr:.2f} dB (应该很低)")
-    
-    print("\n场景 5: PIT 多说话人指标")
-    print("-" * 80)
-    num_speakers = 2
-    estimations = torch.stack([speaker1 * 0.9 + speaker2 * 0.1, 
-                               speaker2 * 0.9 + speaker1 * 0.1])
-    targets = torch.stack([speaker1, speaker2])
-    
-    si_sdr_pit, best_perm = calculate_pit_si_sdr(estimations, targets)
-    
-    print(f"  PIT SI-SDR: {si_sdr_pit:.2f} dB, 最优排列: {best_perm}")
-    
-    print("\n" + "=" * 80)
-    print("✓ SI-SDR 指标测试完成！")
-    print("=" * 80)
-    print("\n指标解读:")
-    print("  SI-SDR: 尺度不变信号失真比，专注于波形形状相似性")
-    print("     - 零均值化 + 尺度不变投影")
-    print("     - 对幅度缩放不敏感")
-    print()
-    print("  评判标准:")
-    print("     - SI-SDR > 10 dB: 良好分离")
-    print("     - SI-SDR > 15 dB: 优秀分离")
-    print()
-    print("  应用建议:")
-    print("     - SI-SDR 是现代语音分离研究中最广泛使用的指标")
-    print("     - Conv-TasNet 等现代方法主要使用 SI-SDR")
-    print()

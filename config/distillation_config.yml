@@ -1,0 +1,178 @@
+# 知识蒸馏配置文件 - 使用本地checkpoint
+
+# 数据集配置
+dataset:
+  name: "AISHELL-3"
+  data_path: "data/processed1000"
+  sample_rate: 8000
+  chunk_size: 32000
+  use_all_chunks: true
+
+# 教师模型配置
+teacher:
+  model_type: "Conv-TasNet"
+  
+  # 加载方式：'asteroid' (推荐，无需token), 'speechbrain' (需要token), 或 'local'
+  load_from: "asteroid"     # 使用Asteroid预训练模型（推荐）
+  
+  # Asteroid预训练模型配置（当load_from='asteroid'时使用，推荐）
+  asteroid:
+    model_name: "mpariente/ConvTasNet_WHAM!_sepclean"  # 或 "mpariente/ConvTasNet_Libri2Mix_sepclean_16k"
+    cache_dir: "./pretrained_models/asteroid"
+  
+  # SpeechBrain预训练模型配置（当load_from='speechbrain'时使用，需要HuggingFace token）
+  speechbrain:
+    model_name: "speechbrain/sepformer-wsj02mix"
+    cache_dir: "./pretrained_models/speechbrain"
+  
+  # 本地checkpoint配置（当load_from='local'时使用）
+  local:
+    checkpoint_path: "experiments/exp_10000_8.9/checkpoints/best_model.pth"
+    architecture:
+      num_speakers: 2
+      encoder_filters: 128
+      encoder_kernel_size: 40
+      encoder_stride: 8
+      bottleneck_channels: 128
+      hidden_channels: 256
+      skip_channels: 128
+      kernel_size: 3
+      num_blocks: 7
+      num_repeats: 2
+      norm_type: "gLN"
+      causal: false
+  
+  freeze: true
+
+# 学生模型配置
+student:
+  model_type: "BTCN"
+  architecture:
+    num_speakers: 2
+    encoder_filters: 128      # 与教师相同，简化蒸馏
+    encoder_kernel_size: 40
+    encoder_stride: 8
+    bottleneck_channels: 128
+    hidden_channels: 128      # 比教师小，体现压缩
+    skip_channels: 128
+    kernel_size: 3
+    num_blocks: 7
+    num_repeats: 3
+    norm_type: "gLN"
+    causal: false
+
+# 知识蒸馏配置
+distillation:
+  mode: "basic"  # 'basic': L_spec + L_task, 'full': 全部5个损失
+  
+  loss_weights:
+    lambda1_spec: 0.2
+    lambda2_enc: 0.1
+    lambda3_tcn: 0.1
+    lambda4_mask: 0.2
+    lambda5_task: 0.4
+  
+  basic_loss_weights:
+    lambda_spec: 0.3
+    lambda_task: 0.7
+  
+  weight_schedule:
+    enabled: true
+    type: "linear"
+    start_epoch: 50
+    end_epoch: 200
+    target_weights:
+      lambda1_spec: 0.1
+      lambda2_enc: 0.1
+      lambda3_tcn: 0.1
+      lambda4_mask: 0.1
+      lambda5_task: 0.6
+  
+  # 特征对齐（适配层）
+  feature_alignment:
+    enabled: false              # 教师和学生维度相同，不需要适配
+    adapter_type: "simple"
+    use_bn: false
+    
+    # 编码器适配: 128 -> 128 (相同维度，不需要)
+    encoder_adapter:
+      enabled: false
+      student_dim: 128
+      teacher_dim: 128
+    
+    # TCN特征适配: 128 -> 128 (相同维度，不需要)
+    tcn_adapter:
+      enabled: false
+      student_dim: 128
+      teacher_dim: 128
+
+# 训练配置
+training:
+  batch_size: 4
+  num_epochs: 240
+  learning_rate: 0.001
+  optimizer: "Adam"
+  weight_decay: 1.0e-5
+  accumulation_steps: 2
+  use_amp: true
+  
+  scheduler:
+    type: "ReduceLROnPlateau"
+    mode: "min"
+    patience: 5
+    factor: 0.5
+    min_lr: 1.0e-6
+  
+  gradient_clip: 200
+  early_stopping_patience: 30
+  seed: 42
+
+# 评估配置
+evaluation:
+  # 评估指标配置（使用 Asteroid + PySTOI）
+  metrics:
+    enabled: ['si_sdr', 'sdr', 'sir', 'sar']  # 启用的指标列表
+    # 可选: 'si_sdr', 'sdr', 'sir', 'sar', 'stoi', 'si_sdri'
+    
+  use_asteroid: true                  # 使用 Asteroid 库（自动 PIT）
+  include_stoi: false                 # 是否计算 STOI（可懂度，纯Python）
+  
+  # 可视化配置
+  plot_metrics: ['si_sdr', 'sdr', 'sir', 'sar']  # 在图表中显示的指标
+  
+# 验证配置
+validation:
+  batch_size: 1
+  eval_interval: 5
+
+# 设备配置
+device:
+  use_cuda: true
+  gpu_ids: [0]
+  num_workers: 4
+
+# 日志与保存
+logging:
+  experiment_name: "distillation_btcn_001"
+  log_dir: "experiments/distillation_btcn_001/logs"
+  checkpoint_dir: "experiments/distillation_btcn_001/checkpoints"
+  result_dir: "experiments/distillation_btcn_001/results"
+  
+  save_interval: 5
+  save_best_only: false
+  visualize: true
+  tensorboard: true
+  
+  log_items:
+    - "total_loss"
+    - "L_spec"
+    - "L_enc"
+    - "L_tcn"
+    - "L_mask"
+    - "L_task"
+    - "si_sdr"
+    - "sdr"
+    - "si_sdri"
+    - "learning_rate"
+    - "epoch_time"
+

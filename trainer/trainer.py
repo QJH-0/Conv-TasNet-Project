@@ -133,9 +133,18 @@ class Trainer:
         # 历史记录
         self.train_losses = []
         self.val_losses = []
-        self.metrics_history = {
-            'si_sdr': []
-        }
+        # 从配置文件读取评估设置
+        self.eval_config = config.get('evaluation', {})
+        enabled_metrics = self.eval_config.get('metrics', {}).get('enabled', ['si_sdr', 'sdr', 'sir', 'sar'])
+        
+        # 初始化指标历史
+        self.metrics_history = {metric: [] for metric in enabled_metrics}
+        # SI-SDRi 总是计算（如果有 si_sdr）
+        if 'si_sdr' in enabled_metrics:
+            self.metrics_history['si_sdri'] = []
+        # STOI 如果启用也添加
+        if self.eval_config.get('include_stoi', False):
+            self.metrics_history['stoi'] = []
     
     def _create_optimizer(self, config):
         """创建优化器（论文标准配置）"""
@@ -353,8 +362,20 @@ class Trainer:
         
         avg_loss = total_loss / num_batches
         
-        # 计算评估指标
-        metrics = evaluate_separation(self.model, dataloader, self.device)
+        # 从配置读取评估设置
+        enabled_metrics = self.eval_config.get('metrics', {}).get('enabled', ['si_sdr', 'sdr', 'sir', 'sar'])
+        use_asteroid = self.eval_config.get('use_asteroid', True)
+        include_stoi = self.eval_config.get('include_stoi', False)
+        
+        # 计算评估指标（使用 Asteroid 自动 PIT + 误差分解）
+        metrics = evaluate_separation(
+            self.model, 
+            dataloader, 
+            self.device,
+            metrics=enabled_metrics,
+            use_asteroid=use_asteroid,
+            include_stoi=include_stoi
+        )
         
         return avg_loss, metrics
     
@@ -434,9 +455,9 @@ class Trainer:
         self.best_val_loss = checkpoint['best_val_loss']
         self.train_losses = checkpoint.get('train_losses', [])
         self.val_losses = checkpoint.get('val_losses', [])
-        self.metrics_history = checkpoint.get('metrics_history', {
-            'si_sdr': []
-        })
+        # 从checkpoint恢复metrics_history，如果不存在则初始化
+        default_metrics = {metric: [] for metric in self.metrics_history.keys()}
+        self.metrics_history = checkpoint.get('metrics_history', default_metrics)
         
         self.logger.info(f"Checkpoint loaded: {checkpoint_path}")
         self.logger.info(f"Resuming from epoch {self.start_epoch}")
@@ -485,10 +506,22 @@ class Trainer:
                 # 验证
                 val_loss, metrics = self.validate(val_loader)
                 self.val_losses.append(val_loss)
-                self.metrics_history['si_sdr'].append(metrics['si_sdr'])
                 
+                # 记录所有配置的指标
+                for metric_name in self.metrics_history.keys():
+                    self.metrics_history[metric_name].append(metrics.get(metric_name, 0))
+                
+                # 日志输出
                 self.logger.info(f"Val Loss: {val_loss:.4f}")
-                self.logger.info(f"SI-SDR: {metrics['si_sdr']:.2f} dB ")
+                for metric_name, value in metrics.items():
+                    if metric_name == 'stoi':
+                        self.logger.info(f"STOI: {value:.4f} (可懂度)")
+                    elif metric_name == 'sir':
+                        self.logger.info(f"SIR: {value:.2f} dB (串扰抑制)")
+                    elif metric_name == 'sar':
+                        self.logger.info(f"SAR: {value:.2f} dB (算法失真)")
+                    else:
+                        self.logger.info(f"{metric_name.upper()}: {value:.2f} dB")
                 
                 # 学习率调度
                 if self.scheduler_step_on_epoch:
@@ -524,9 +557,12 @@ class Trainer:
                         self.val_losses,
                         os.path.join(self.result_dir, 'loss_curves.png')
                     )
+                    # 从配置读取要绘制的指标
+                    plot_metric_list = self.eval_config.get('plot_metrics', None)
                     plot_metrics(
                         self.metrics_history,
-                        os.path.join(self.result_dir, 'metrics.png')
+                        os.path.join(self.result_dir, 'metrics.png'),
+                        plot_metrics=plot_metric_list
                     )
         
         except KeyboardInterrupt:
@@ -536,5 +572,16 @@ class Trainer:
         self.logger.info("Training Completed")
         self.logger.info("=" * 80)
         self.logger.info(f"Best Validation Loss: {self.best_val_loss:.4f}")
-        self.logger.info(f"Best SI-SDR: {max(self.metrics_history['si_sdr']):.2f} dB")
-        self.logger.info(f"Final SI-SDR: {self.metrics_history['si_sdr'][-1]:.2f} dB")
+        
+        # 输出所有记录的指标
+        for metric_name, values in self.metrics_history.items():
+            if values:  # 只输出有数据的指标
+                best_val = max(values) if metric_name != 'loss' else min(values)
+                final_val = values[-1]
+                
+                if metric_name == 'stoi':
+                    self.logger.info(f"Best {metric_name.upper()}: {best_val:.4f}")
+                    self.logger.info(f"Final {metric_name.upper()}: {final_val:.4f}")
+                else:
+                    self.logger.info(f"Best {metric_name.upper()}: {best_val:.2f} dB")
+                    self.logger.info(f"Final {metric_name.upper()}: {final_val:.2f} dB")

@@ -1,0 +1,8 @@
+# 忽略所有下载的模型文件
+asteroid/
+speechbrain/
+
+# 但保留 README 和目录结构
+!README.md
+!.gitignore
+
