@@ -93,14 +93,15 @@ loss:
 evaluation:
   # 评估指标配置（使用 Asteroid + PySTOI）
   metrics:
-    enabled: ['si_sdr', 'sdr', 'sir', 'sar']  # 启用的指标列表
+    enabled: ['si_sdr']  # 训练时只用SI-SDR，速度最快
+    # 完整评估: ['si_sdr', 'sdr', 'sir', 'sar']
     # 可选: 'si_sdr', 'sdr', 'sir', 'sar', 'stoi', 'si_sdri'
     
   use_asteroid: true                  # 使用 Asteroid 库（自动 PIT）
   include_stoi: false                 # 是否计算 STOI（可懂度，纯Python）
   
   # 可视化配置
-  plot_metrics: ['si_sdr', 'sdr', 'sir', 'sar']  # 在图表中显示的指标
+  plot_metrics: ['si_sdr']  # 在图表中显示的指标
   
 # 验证配置
 validation:
