@@ -35,7 +35,7 @@ class DistillationTrainer:
                  config, device, logger=None):
         """
         Args:
-            teacher_model: 教师模型(Conv-TasNet或SpeechBrain Separator)
+            teacher_model: 教师模型(Conv-TasNet)
             student_model: 学生模型(BTCN)
             train_loader: 训练数据加载器
             val_loader: 验证数据加载器
@@ -50,9 +50,6 @@ class DistillationTrainer:
         self.config = config
         self.device = device
         self.logger = logger
-        
-        # 检查教师模型类型
-        self.is_speechbrain_teacher = self._check_speechbrain_model()
         
         # 冻结教师模型
         self._freeze_teacher()
@@ -95,77 +92,14 @@ class DistillationTrainer:
         self.logger.info(f"学生模型参数: {sum(p.numel() for p in self.student.parameters()):,}")
         self.logger.info(f"适配层参数: {sum(p.numel() for p in self.adapters.parameters()):,}")
     
-    def _check_speechbrain_model(self):
-        """检查是否是SpeechBrain模型"""
-        model_type = type(self.teacher).__name__
-        is_sb = 'Sepformer' in model_type or 'Separation' in model_type
-        if is_sb:
-            self.logger.info(f"检测到SpeechBrain模型: {model_type}")
-        return is_sb
-    
-    def _separate_batch_speechbrain(self, mixture):
-        """
-        SpeechBrain模型的批处理包装方法
-        
-        Args:
-            mixture: [B, T] - 混合波形张量
-            
-        Returns:
-            separated: [B, C, T] - 分离后的波形
-        """
-        batch_size = mixture.shape[0]
-        separated_list = []
-        
-        # SpeechBrain模型通常逐样本处理
-        for i in range(batch_size):
-            # 获取单个样本 [T]
-            single_mixture = mixture[i]
-            
-            # 调用SpeechBrain的separate方法
-            # 注意：SpeechBrain返回的是 [num_sources, T]
-            try:
-                est_sources = self.teacher.separate_batch(single_mixture.unsqueeze(0))
-                # 如果返回的是字典或其他格式，提取张量
-                if isinstance(est_sources, dict):
-                    est_sources = est_sources['est_sources']
-                # 如果有额外的批次维度，去掉
-                if est_sources.dim() == 3 and est_sources.shape[0] == 1:
-                    est_sources = est_sources.squeeze(0)
-            except AttributeError:
-                # 如果没有separate_batch方法，尝试使用mods直接推理
-                if hasattr(self.teacher, 'mods') and hasattr(self.teacher.mods, 'encoder'):
-                    # 使用底层模型推理
-                    mix_w = self.teacher.mods.encoder(single_mixture.unsqueeze(0))
-                    est_mask = self.teacher.mods.masknet(mix_w)
-                    mix_w = torch.stack([mix_w] * est_mask.shape[1])
-                    sep_h = mix_w * est_mask
-                    est_sources = self.teacher.mods.decoder(sep_h)
-                    est_sources = est_sources.squeeze(0)
-                else:
-                    raise RuntimeError("SpeechBrain模型没有可用的分离方法")
-            
-            separated_list.append(est_sources)
-        
-        # 堆叠成批次 [B, C, T]
-        separated = torch.stack(separated_list, dim=0)
-        
-        return separated
-    
     def _freeze_teacher(self):
         """冻结教师模型参数"""
         self.teacher.eval()
         
-        # SpeechBrain模型的冻结方式
-        if self.is_speechbrain_teacher:
-            if hasattr(self.teacher, 'mods'):
-                for param in self.teacher.mods.parameters():
-                    param.requires_grad = False
-            self.logger.info("SpeechBrain教师模型已冻结")
-        else:
-            # 普通PyTorch模型
-            for param in self.teacher.parameters():
-                param.requires_grad = False
-            self.logger.info("教师模型已冻结")
+        # 冻结教师模型参数
+        for param in self.teacher.parameters():
+            param.requires_grad = False
+        self.logger.info("教师模型已冻结")
     
     def _create_adapters(self) -> nn.ModuleDict:
         """创建特征适配层"""
@@ -300,25 +234,10 @@ class DistillationTrainer:
             with torch.no_grad():
                 if isinstance(self.criterion, BasicDistillationLoss):
                     # 基础蒸馏只需要输出
-                    if self.is_speechbrain_teacher:
-                        # SpeechBrain模型使用批处理包装方法
-                        teacher_output = self._separate_batch_speechbrain(mixture)
-                    else:
-                        teacher_output = self.teacher(mixture)
+                    teacher_output = self.teacher(mixture)
                 else:
                     # 完整蒸馏需要中间特征
-                    if self.is_speechbrain_teacher:
-                        # SpeechBrain模型不支持中间特征，只返回输出
-                        teacher_output = self._separate_batch_speechbrain(mixture)
-                        # 构造简化的输出字典
-                        teacher_outputs = {
-                            'output': teacher_output,
-                            'encoder_output': None,
-                            'tcn_features': [],
-                            'masks': None
-                        }
-                    else:
-                        teacher_outputs = self.teacher(mixture, return_intermediate=True)
+                    teacher_outputs = self.teacher(mixture, return_intermediate=True)
             
             # 学生模型前向传播
             if self.use_amp:
@@ -439,21 +358,9 @@ class DistillationTrainer:
                 
                 # 教师模型
                 if isinstance(self.criterion, BasicDistillationLoss):
-                    if self.is_speechbrain_teacher:
-                        teacher_output = self._separate_batch_speechbrain(mixture)
-                    else:
-                        teacher_output = self.teacher(mixture)
+                    teacher_output = self.teacher(mixture)
                 else:
-                    if self.is_speechbrain_teacher:
-                        teacher_output = self._separate_batch_speechbrain(mixture)
-                        teacher_outputs = {
-                            'output': teacher_output,
-                            'encoder_output': None,
-                            'tcn_features': [],
-                            'masks': None
-                        }
-                    else:
-                        teacher_outputs = self.teacher(mixture, return_intermediate=True)
+                    teacher_outputs = self.teacher(mixture, return_intermediate=True)
                 
                 # 学生模型
                 student_outputs = self._forward_student(mixture)

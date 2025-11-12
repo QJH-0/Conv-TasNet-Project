@@ -21,38 +21,17 @@ from models.bconv_tasnet import BConvTasNet
 from dataset.dataloader import create_dataloader
 from utils.metrics import evaluate_separation
 from utils.logger import setup_logger
-from utils.pretrained_model_utils import load_asteroid_model, load_speechbrain_model, print_available_models
 
 
 def load_config(config_path):
-    """加载配置文件 - 先从config_loadpath.yml获取实际配置文件路径"""
-    # 首先加载config_loadpath.yml获取实际配置文件路径
-    loadpath_config_file = os.path.join(project_root, 'config', 'config_loadpath.yml')
-    
-    if os.path.exists(loadpath_config_file):
-        with open(loadpath_config_file, 'r', encoding='utf-8') as f:
-            loadpath_config = yaml.safe_load(f)
-        
-        # 从config_loadpath.yml获取实际配置文件路径
-        if 'loadPath' in loadpath_config and 'config' in loadpath_config['loadPath']:
-            actual_config_path = loadpath_config['loadPath']['config']
-            print(f"从 config_loadpath.yml 加载配置文件路径: {actual_config_path}")
-        else:
-            # 如果config_loadpath.yml格式不正确，使用传入的参数
-            print(f"警告: config_loadpath.yml 格式不正确，使用默认配置路径")
-            actual_config_path = config_path
-    else:
-        # 如果config_loadpath.yml不存在，使用传入的参数
-        print(f"警告: config_loadpath.yml 不存在，使用默认配置路径")
-        actual_config_path = config_path
-    
+    """加载配置文件"""
     # 如果是相对路径，转换为相对于项目根目录的绝对路径
-    if not os.path.isabs(actual_config_path):
-        actual_config_path = os.path.join(project_root, actual_config_path)
+    if not os.path.isabs(config_path):
+        config_path = os.path.join(project_root, config_path)
     
-    print(f"加载配置文件: {actual_config_path}")
+    print(f"加载配置文件: {config_path}")
     
-    with open(actual_config_path, 'r', encoding='utf-8') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
     # 规范化配置中的所有路径为基于项目根目录的绝对路径
@@ -103,35 +82,6 @@ def load_model(checkpoint_path, config, device, model_type='conv_tasnet'):
     return model
 
 
-def load_pretrained_model(source, model_name, device, cache_dir=None):
-    """
-    加载预训练模型（Asteroid 或 SpeechBrain）
-    
-    Args:
-        source: 'asteroid' 或 'speechbrain'
-        model_name: 模型名称
-        device: 设备
-        cache_dir: 缓存目录
-        
-    Returns:
-        model: 加载的模型
-        is_speechbrain: 是否是 SpeechBrain 模型
-    """
-    if source == 'asteroid':
-        model, info = load_asteroid_model(model_name, device, cache_dir)
-        print(f"\n模型信息:")
-        print(f"  来源: Asteroid")
-        print(f"  模型名: {model_name}")
-        print(f"  参数量: {info['total_parameters_M']}M")
-        return model, False
-    elif source == 'speechbrain':
-        separator, info = load_speechbrain_model(model_name, device, cache_dir)
-        print(f"\n模型信息:")
-        print(f"  来源: SpeechBrain")
-        print(f"  模型名: {model_name}")
-        return separator, True
-    else:
-        raise ValueError(f"不支持的模型来源: {source}。请使用 'asteroid' 或 'speechbrain'")
 
 
 def find_best_checkpoint(config):
@@ -172,23 +122,7 @@ def main():
                        choices=['conv_tasnet', 'bconv_tasnet'],
                        help='Model type for local checkpoint')
     
-    # 预训练模型参数
-    parser.add_argument('--pretrained', type=str, default=None,
-                       choices=['asteroid', 'speechbrain'],
-                       help='Use pretrained model from Asteroid or SpeechBrain')
-    parser.add_argument('--pretrained-name', type=str, default=None,
-                       help='Pretrained model name (e.g., mpariente/ConvTasNet_WHAM!_sepclean)')
-    parser.add_argument('--cache-dir', type=str, default=None,
-                       help='Cache directory for pretrained models')
-    parser.add_argument('--list-models', action='store_true',
-                       help='List available pretrained models and exit')
-    
     args = parser.parse_args()
-    
-    # 如果只是列出模型，打印后退出
-    if args.list_models:
-        print_available_models()
-        return
     
     # 加载配置
     config = load_config(args.config)
@@ -216,55 +150,25 @@ def main():
     log_dir = config['logging']['log_dir']
     logger = setup_logger('eval', log_dir, 'evaluation.log')
     
-    # 判断使用预训练模型还是本地checkpoint
-    is_speechbrain = False
-    if args.pretrained:
-        # 使用预训练模型
-        if not args.pretrained_name:
-            print(f"Error: --pretrained-name is required when using --pretrained")
-            print("\n使用 --list-models 查看可用的预训练模型")
-            sys.exit(1)
-        
-        logger.info(f"模型来源: {args.pretrained} 预训练模型")
-        logger.info(f"模型名称: {args.pretrained_name}")
-        print(f"模型来源: {args.pretrained} 预训练模型")
-        print(f"模型名称: {args.pretrained_name}")
-        
-        # 设置缓存目录
-        if args.cache_dir:
-            cache_dir = args.cache_dir
-        else:
-            cache_dir = f"pretrained_models/{args.pretrained}"
-        logger.info(f"缓存目录: {cache_dir}")
-        print(f"缓存目录: {cache_dir}")
-        
-        # 加载预训练模型
-        logger.info("正在加载预训练模型...")
-        model, is_speechbrain = load_pretrained_model(args.pretrained, args.pretrained_name, device, cache_dir)
-        logger.info("✓ 预训练模型加载成功")
-        
-    else:
-        # 使用本地checkpoint
-        # 自动查找检查点
+    # 自动查找检查点
+    if args.checkpoint is None:
+        print("未指定checkpoint，自动查找最佳模型...")
+        args.checkpoint = find_best_checkpoint(config)
         if args.checkpoint is None:
-            print("未指定checkpoint，自动查找最佳模型...")
-            args.checkpoint = find_best_checkpoint(config)
-            if args.checkpoint is None:
-                print("错误: 未找到任何模型检查点!")
-                print(f"请检查目录: {config['logging']['checkpoint_dir']}")
-                print("或使用 --pretrained 加载预训练模型")
-                sys.exit(1)
-            print(f"找到模型: {args.checkpoint}")
-        
-        print(f"Checkpoint: {args.checkpoint}")
-        print(f"Model type: {args.model_type}")
-        logger.info(f"Checkpoint: {args.checkpoint}")
-        logger.info(f"Model type: {args.model_type}")
-        
-        # 加载模型
-        logger.info("Loading model...")
-        model = load_model(args.checkpoint, config, device, args.model_type)
-        logger.info("Model loaded successfully")
+            print("错误: 未找到任何模型检查点!")
+            print(f"请检查目录: {config['logging']['checkpoint_dir_load']}")
+            sys.exit(1)
+        print(f"找到模型: {args.checkpoint}")
+    
+    print(f"Checkpoint: {args.checkpoint}")
+    print(f"Model type: {args.model_type}")
+    logger.info(f"Checkpoint: {args.checkpoint}")
+    logger.info(f"Model type: {args.model_type}")
+    
+    # 加载模型
+    logger.info("Loading model...")
+    model = load_model(args.checkpoint, config, device, args.model_type)
+    logger.info("Model loaded successfully")
     
     # 创建数据加载器（wsj0-2mix格式）
     if args.data_dir:
@@ -309,14 +213,6 @@ def main():
     # 评估（使用 Asteroid 自动 PIT + 误差分解）
     logger.info("\nEvaluating...")
     logger.info(f"Enabled metrics: {enabled_metrics}")
-    
-    # 如果是 SpeechBrain 模型，需要特殊处理
-    if is_speechbrain:
-        logger.warning("SpeechBrain 模型评估当前不支持标准评估流程")
-        logger.warning("建议使用 Asteroid 模型或本地训练的模型进行标准评估")
-        print("\n警告: SpeechBrain 模型评估功能尚未完全实现")
-        print("建议使用 --pretrained asteroid 或本地训练模型进行评估")
-        sys.exit(0)
     
     metrics = evaluate_separation(
         model, 

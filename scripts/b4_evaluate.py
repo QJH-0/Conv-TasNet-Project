@@ -23,34 +23,14 @@ from utils.logger import setup_logger
 
 
 def load_config(config_path):
-    """加载配置文件 - 先从config_loadpath.yml获取实际配置文件路径"""
-    # 首先加载config_loadpath.yml获取实际配置文件路径
-    loadpath_config_file = os.path.join(project_root, 'config', 'config_loadpath.yml')
-    
-    if os.path.exists(loadpath_config_file):
-        with open(loadpath_config_file, 'r', encoding='utf-8') as f:
-            loadpath_config = yaml.safe_load(f)
-        
-        # 从config_loadpath.yml获取实际配置文件路径
-        if 'loadPath' in loadpath_config and 'config' in loadpath_config['loadPath']:
-            actual_config_path = loadpath_config['loadPath']['config']
-            print(f"从 config_loadpath.yml 加载配置文件路径: {actual_config_path}")
-        else:
-            # 如果config_loadpath.yml格式不正确，使用传入的参数
-            print(f"警告: config_loadpath.yml 格式不正确，使用默认配置路径")
-            actual_config_path = config_path
-    else:
-        # 如果config_loadpath.yml不存在，使用传入的参数
-        print(f"警告: config_loadpath.yml 不存在，使用默认配置路径")
-        actual_config_path = config_path
-    
+    """加载配置文件"""
     # 如果是相对路径，转换为相对于项目根目录的绝对路径
-    if not os.path.isabs(actual_config_path):
-        actual_config_path = os.path.join(project_root, actual_config_path)
+    if not os.path.isabs(config_path):
+        config_path = os.path.join(project_root, config_path)
     
-    print(f"加载配置文件: {actual_config_path}")
+    print(f"加载配置文件: {config_path}")
     
-    with open(actual_config_path, 'r', encoding='utf-8') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
     # 规范化配置中的所有路径为基于项目根目录的绝对路径

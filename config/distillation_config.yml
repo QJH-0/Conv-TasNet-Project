@@ -12,20 +12,7 @@ dataset:
 teacher:
   model_type: "Conv-TasNet"
   
-  # 加载方式：'asteroid' (推荐，无需token), 'speechbrain' (需要token), 或 'local'
-  load_from: "asteroid"     # 使用Asteroid预训练模型（推荐）
-  
-  # Asteroid预训练模型配置（当load_from='asteroid'时使用，推荐）
-  asteroid:
-    model_name: "mpariente/ConvTasNet_WHAM!_sepclean"  # 或 "mpariente/ConvTasNet_Libri2Mix_sepclean_16k"
-    cache_dir: "./pretrained_models/asteroid"
-  
-  # SpeechBrain预训练模型配置（当load_from='speechbrain'时使用，需要HuggingFace token）
-  speechbrain:
-    model_name: "speechbrain/sepformer-wsj02mix"
-    cache_dir: "./pretrained_models/speechbrain"
-  
-  # 本地checkpoint配置（当load_from='local'时使用）
+  # 本地checkpoint配置
   local:
     checkpoint_path: "experiments/exp_10000_8.9/checkpoints/best_model.pth"
     architecture:

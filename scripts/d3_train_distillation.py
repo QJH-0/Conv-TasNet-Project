@@ -45,248 +45,81 @@ def load_config(config_path):
     return config
 
 
-def load_asteroid_teacher_model(model_name, device, logger, cache_dir=None):
-    """从Asteroid加载预训练教师模型（推荐，无需token验证）
-    
-    Args:
-        model_name: Asteroid模型名称 (例如: mpariente/ConvTasNet_WHAM!_sepclean)
-        device: 设备
-        logger: 日志记录器
-        cache_dir: 缓存目录
-        
-    Returns:
-        teacher: 加载的教师模型
-    """
-    logger.info(f"从Asteroid加载教师模型: {model_name}")
-    
-    try:
-        from asteroid.models import BaseModel
-        
-        # Asteroid加载方式（自动下载，无需token）
-        logger.info("使用Asteroid库加载预训练模型...")
-        model = BaseModel.from_pretrained(
-            model_name,
-            cache_dir=cache_dir if cache_dir else "pretrained_models/asteroid"
-        )
-        
-        model = model.to(device)
-        model.eval()
-        
-        logger.info("✓ 成功从Asteroid加载模型")
-        logger.info(f"   模型类型: {type(model)}")
-        
-        # 统计参数
-        total_params = sum(p.numel() for p in model.parameters())
-        logger.info(f"   模型参数量: {total_params:,} ({total_params/1e6:.2f}M)")
-        
-        return model
-        
-    except ImportError:
-        logger.error("Asteroid库未安装！")
-        raise RuntimeError(
-            "无法加载预训练模型。请安装Asteroid:\n"
-            "  pip install asteroid\n"
-            "或使用本地checkpoint (load_from='local')"
-        )
-    
-    except Exception as e:
-        logger.error(f"加载预训练模型时出错: {str(e)}")
-        logger.info("提示: 确保模型名称格式正确")
-        logger.info("可用Conv-TasNet模型:")
-        logger.info("  - mpariente/ConvTasNet_WHAM!_sepclean")
-        logger.info("  - mpariente/ConvTasNet_Libri2Mix_sepclean_16k")
-        logger.info(f"详细错误: {type(e).__name__}: {str(e)}")
-        raise
-
-
-def load_speechbrain_teacher_model(model_name, device, logger, cache_dir=None):
-    """从SpeechBrain加载预训练教师模型（需要HuggingFace token）
-    
-    Args:
-        model_name: SpeechBrain模型名称 (例如: speechbrain/sepformer-wsj02mix)
-        device: 设备
-        logger: 日志记录器
-        cache_dir: 缓存目录
-        
-    Returns:
-        teacher: 加载的教师模型（作为分离器使用）
-    """
-    logger.info(f"从SpeechBrain加载教师模型: {model_name}")
-    
-    try:
-        # 兼容新旧版本的speechbrain
-        try:
-            from speechbrain.inference.separation import SepformerSeparation
-            logger.info("使用新版SpeechBrain (speechbrain.inference)...")
-        except ImportError:
-            from speechbrain.pretrained import SepformerSeparation
-            logger.info("使用旧版SpeechBrain (speechbrain.pretrained)...")
-        
-        # SpeechBrain加载方式
-        separator = SepformerSeparation.from_hparams(
-            source=model_name,
-            savedir=cache_dir if cache_dir else "pretrained_models/speechbrain",
-            run_opts={"device": str(device)}
-        )
-        
-        logger.info("✓ 成功从SpeechBrain加载模型")
-        logger.info(f"   模型类型: {type(separator)}")
-        
-        # 返回separator对象（它包含.separate()方法）
-        return separator
-        
-    except ImportError:
-        logger.error("SpeechBrain库未安装！")
-        raise RuntimeError(
-            "无法加载预训练模型。请安装SpeechBrain:\n"
-            "  pip install speechbrain\n"
-            "或使用asteroid (load_from='asteroid') 或本地checkpoint (load_from='local')"
-        )
-    
-    except Exception as e:
-        logger.error(f"加载预训练模型时出错: {str(e)}")
-        logger.info("提示: 确保模型名称格式正确")
-        logger.info("可用模型: speechbrain/sepformer-wsj02mix, speechbrain/sepformer-wham, speechbrain/sepformer-libri2mix")
-        logger.info(f"详细错误: {type(e).__name__}: {str(e)}")
-        raise
 
 
 def create_teacher_model(config, device, logger):
-    """创建并加载教师模型
-    
-    支持三种加载方式:
-    1. Asteroid预训练模型 (load_from='asteroid') - 推荐，无需token
-    2. SpeechBrain预训练模型 (load_from='speechbrain') - 需要HuggingFace token
-    3. 本地checkpoint (load_from='local') - 使用自己训练的模型
-    """
+    """创建并加载教师模型（从本地checkpoint加载）"""
     teacher_config = config['teacher']
-    load_from = teacher_config.get('load_from', 'asteroid')
+    local_config = teacher_config.get('local', {})
+    arch_config = local_config.get('architecture', {})
+    checkpoint_path = local_config.get('checkpoint_path')
     
     logger.info("="*80)
     logger.info("加载教师模型")
     logger.info("="*80)
-    logger.info(f"加载方式: {load_from}")
     
-    # 方式1: 从Asteroid加载（推荐方式，无需token）
-    if load_from == 'asteroid':
-        asteroid_config = teacher_config.get('asteroid', {})
-        model_name = asteroid_config.get('model_name')
-        cache_dir = asteroid_config.get('cache_dir', None)
-        
-        if not model_name:
-            raise ValueError("使用Asteroid模型时必须指定 model_name")
-        
-        # 确保cache_dir是绝对路径
-        if cache_dir and not os.path.isabs(cache_dir):
-            cache_dir = os.path.join(project_root, cache_dir)
-        
-        logger.info(f"Asteroid模型: {model_name}")
-        if cache_dir:
-            logger.info(f"缓存目录: {cache_dir}")
-            os.makedirs(cache_dir, exist_ok=True)
-        
-        teacher = load_asteroid_teacher_model(
-            model_name=model_name,
-            device=device,
-            logger=logger,
-            cache_dir=cache_dir
-        )
+    if not checkpoint_path:
+        raise ValueError("使用本地模型时必须指定 checkpoint_path")
     
-    # 方式2: 从SpeechBrain加载（需要token）
-    elif load_from == 'speechbrain':
-        speechbrain_config = teacher_config.get('speechbrain', {})
-        model_name = speechbrain_config.get('model_name')
-        cache_dir = speechbrain_config.get('cache_dir', None)
-        
-        if not model_name:
-            raise ValueError("使用SpeechBrain模型时必须指定 model_name")
-        
-        # 确保cache_dir是绝对路径
-        if cache_dir and not os.path.isabs(cache_dir):
-            cache_dir = os.path.join(project_root, cache_dir)
-        
-        logger.info(f"SpeechBrain模型: {model_name}")
-        if cache_dir:
-            logger.info(f"缓存目录: {cache_dir}")
-            os.makedirs(cache_dir, exist_ok=True)
-        
-        teacher = load_speechbrain_teacher_model(
-            model_name=model_name,
-            device=device,
-            logger=logger,
-            cache_dir=cache_dir
-        )
+    # 确保checkpoint路径是绝对路径
+    if not os.path.isabs(checkpoint_path):
+        checkpoint_path = os.path.join(project_root, checkpoint_path)
     
-    # 方式3: 从本地checkpoint加载
-    else:  # load_from == 'local'
-        local_config = teacher_config.get('local', {})
-        arch_config = local_config.get('architecture', {})
-        checkpoint_path = local_config.get('checkpoint_path')
-        
-        if not checkpoint_path:
-            raise ValueError("使用本地模型时必须指定 checkpoint_path")
-        
-        # 确保checkpoint路径是绝对路径
-        if not os.path.isabs(checkpoint_path):
-            checkpoint_path = os.path.join(project_root, checkpoint_path)
-        
-        # 创建教师模型
-        logger.info("创建 Conv-TasNet 模型...")
-        teacher = ConvTasNet(
-            num_speakers=arch_config['num_speakers'],
-            encoder_filters=arch_config['encoder_filters'],
-            encoder_kernel_size=arch_config['encoder_kernel_size'],
-            encoder_stride=arch_config['encoder_stride'],
-            bottleneck_channels=arch_config['bottleneck_channels'],
-            hidden_channels=arch_config['hidden_channels'],
-            skip_channels=arch_config['skip_channels'],
-            kernel_size=arch_config['kernel_size'],
-            num_blocks=arch_config['num_blocks'],
-            num_repeats=arch_config['num_repeats'],
-            norm_type=arch_config['norm_type'],
-            causal=arch_config['causal']
-        )
-        
-        # 加载本地checkpoint
-        if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"教师模型检查点不存在: {checkpoint_path}")
-        
-        logger.info(f"加载本地checkpoint: {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
-        
-        # 兼容不同的checkpoint格式
-        if 'model_state_dict' in checkpoint:
-            teacher.load_state_dict(checkpoint['model_state_dict'])
-            logger.info("✓ 从 'model_state_dict' 加载权重")
-        elif 'state_dict' in checkpoint:
-            teacher.load_state_dict(checkpoint['state_dict'])
-            logger.info("✓ 从 'state_dict' 加载权重")
-        else:
-            teacher.load_state_dict(checkpoint)
-            logger.info("✓ 直接加载权重")
-        
-        teacher = teacher.to(device)
-        teacher.eval()
+    # 创建教师模型
+    logger.info("创建 Conv-TasNet 模型...")
+    teacher = ConvTasNet(
+        num_speakers=arch_config['num_speakers'],
+        encoder_filters=arch_config['encoder_filters'],
+        encoder_kernel_size=arch_config['encoder_kernel_size'],
+        encoder_stride=arch_config['encoder_stride'],
+        bottleneck_channels=arch_config['bottleneck_channels'],
+        hidden_channels=arch_config['hidden_channels'],
+        skip_channels=arch_config['skip_channels'],
+        kernel_size=arch_config['kernel_size'],
+        num_blocks=arch_config['num_blocks'],
+        num_repeats=arch_config['num_repeats'],
+        norm_type=arch_config['norm_type'],
+        causal=arch_config['causal']
+    )
     
-    # 统计参数（仅适用于本地模型）
-    if load_from == 'local' and hasattr(teacher, 'parameters'):
-        total_params = sum(p.numel() for p in teacher.parameters())
-        trainable_params = sum(p.numel() for p in teacher.parameters() if p.requires_grad)
-        
-        logger.info(f"教师模型参数量: {total_params:,} ({total_params/1e6:.2f}M)")
-        logger.info(f"可训练参数: {trainable_params:,}")
+    # 加载本地checkpoint
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"教师模型检查点不存在: {checkpoint_path}")
     
-    # 测试前向传播（仅适用于本地模型）
-    if load_from == 'local':
-        logger.info("测试教师模型前向传播...")
-        with torch.no_grad():
-            test_input = torch.randn(1, 16000).to(device)
-            try:
-                test_output = teacher(test_input)
-                logger.info(f"✓ 前向传播成功: {test_input.shape} -> {test_output.shape}")
-            except Exception as e:
-                logger.error(f"✗ 前向传播失败: {str(e)}")
-                raise
+    logger.info(f"加载本地checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    
+    # 兼容不同的checkpoint格式
+    if 'model_state_dict' in checkpoint:
+        teacher.load_state_dict(checkpoint['model_state_dict'])
+        logger.info("✓ 从 'model_state_dict' 加载权重")
+    elif 'state_dict' in checkpoint:
+        teacher.load_state_dict(checkpoint['state_dict'])
+        logger.info("✓ 从 'state_dict' 加载权重")
+    else:
+        teacher.load_state_dict(checkpoint)
+        logger.info("✓ 直接加载权重")
+    
+    teacher = teacher.to(device)
+    teacher.eval()
+    
+    # 统计参数
+    total_params = sum(p.numel() for p in teacher.parameters())
+    trainable_params = sum(p.numel() for p in teacher.parameters() if p.requires_grad)
+    
+    logger.info(f"教师模型参数量: {total_params:,} ({total_params/1e6:.2f}M)")
+    logger.info(f"可训练参数: {trainable_params:,}")
+    
+    # 测试前向传播
+    logger.info("测试教师模型前向传播...")
+    with torch.no_grad():
+        test_input = torch.randn(1, 16000).to(device)
+        try:
+            test_output = teacher(test_input)
+            logger.info(f"✓ 前向传播成功: {test_input.shape} -> {test_output.shape}")
+        except Exception as e:
+            logger.error(f"✗ 前向传播失败: {str(e)}")
+            raise
     
     return teacher
 
