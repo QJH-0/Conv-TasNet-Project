@@ -17,7 +17,7 @@ dataset:
   train_ratio: 0.8                    # 训练集比例
   dev_ratio: 0.1                      # 验证集比例 (dev)
   sample_rate: 8000                   # 采样率 (8kHz for wsj0-2mix/Libri2Mix_8k)
-  snr_range: [0, 20]          # WSJ0-2mix / Libri2Mix 标准
+  snr_range: [-3,3]          # WSJ0-2mix / Libri2Mix 标准
 
   # 进阶：极限测试（仅验证集）
   # snr_range_train: [0, 20]
